@@ -67,14 +67,17 @@ export function DiffCodeBlock({
   content,
   className,
   maxLines,
+  bare = false,
 }: {
   content: string;
   className?: string;
   maxLines?: number;
+  /** No card chrome — for embedding inside an existing result frame. */
+  bare?: boolean;
 }) {
   return (
     <div
-      className={`code-block diff-block${className ? ` ${className}` : ""}`}
+      className={`code-block diff-block${bare ? " bare" : ""}${className ? ` ${className}` : ""}`}
       role="text"
     >
       {renderDiffLines(content, maxLines)}

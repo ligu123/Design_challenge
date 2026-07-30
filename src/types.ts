@@ -8,12 +8,15 @@ export type TicketStatus =
 export type Priority = "low" | "medium" | "high";
 
 export type ActivityKind =
+  | "plan"
   | "read"
   | "search"
   | "edit"
+  | "lint"
   | "terminal"
   | "test"
   | "fix"
+  | "git"
   | "ask";
 
 export type ActivityStatus = "running" | "done" | "failed" | "waiting";
@@ -36,13 +39,18 @@ export type TimelineItem =
       title: string;
       detail: string;
       status: ActivityStatus;
-      evidenceId?: string;
       /** Wall time for this step */
       durationMs?: number;
       /** Tokens used for this step */
       tokens?: number;
       /** Paths touched in this step */
       filesChanged?: string[];
+    }
+  | {
+      id: string;
+      /** Artifact produced by a prior action — separate from the action itself */
+      type: "result";
+      evidenceId: string;
     };
 
 export interface FileEvidence {
@@ -114,7 +122,6 @@ export type PlaceId =
   | "tickets"
   | "ops"
   | "policies"
-  | "workspace"
   | "memory"
   | "environments";
 
@@ -152,6 +159,8 @@ export interface TicketComment {
   author: string;
   body: string;
   createdAt: string;
+  /** When set, this comment is a reply to another comment. */
+  parentId?: string;
 }
 
 export interface TicketDelivery {

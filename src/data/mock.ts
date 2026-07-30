@@ -26,6 +26,387 @@ function specDoc(ticketKey: string, body: string): TicketDocument {
   };
 }
 
+function doc(
+  id: string,
+  path: string,
+  content: string,
+  kind: TicketDocument["kind"] = "code",
+  title?: string,
+): TicketDocument {
+  return {
+    id,
+    title: title ?? path.split("/").pop() ?? path,
+    path,
+    kind,
+    content,
+  };
+}
+
+/** Shared repo scaffold so Documents feels like a real project tree. */
+function repoScaffold(ticketKey: string, repoPath: string): TicketDocument[] {
+  const p = (name: string) => `${ticketKey}-${name}`;
+  const web = [
+    doc(
+      p("pkg"),
+      "package.json",
+      `{
+  "name": "@acme/web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "test": "vitest run",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  }
+}`,
+    ),
+    doc(
+      p("tsconfig"),
+      "tsconfig.json",
+      `{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "jsx": "react-jsx",
+    "strict": true,
+    "baseUrl": ".",
+    "paths": { "@/*": ["src/*"] }
+  },
+  "include": ["src"]
+}`,
+    ),
+    doc(
+      p("vite"),
+      "vite.config.ts",
+      `import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+
+export default defineConfig({
+  plugins: [react()],
+  server: { port: 5173 },
+});`,
+    ),
+    doc(
+      p("eslint"),
+      "eslint.config.js",
+      `export default [
+  {
+    files: ["**/*.{ts,tsx}"],
+    rules: {
+      "no-console": ["warn", { allow: ["warn", "error"] }],
+    },
+  },
+];`,
+    ),
+    doc(
+      p("readme"),
+      "README.md",
+      `# ${repoPath}
+
+Agent workspace for ticket work. Prefer small diffs and focused tests.`,
+      "markdown",
+    ),
+    doc(
+      p("agents"),
+      "AGENTS.md",
+      `# Agent rules
+
+- Prefer small diffs
+- Match existing patterns
+- Run focused tests before finishing
+- Ask before deleting files`,
+      "markdown",
+    ),
+    doc(
+      p("main"),
+      "src/main.tsx",
+      `import { createRoot } from "react-dom/client";
+import { App } from "./App";
+import "./styles/app.css";
+
+createRoot(document.getElementById("root")!).render(<App />);`,
+    ),
+    doc(
+      p("app"),
+      "src/App.tsx",
+      `import { AppShell } from "./components/AppShell";
+
+export function App() {
+  return <AppShell />;
+}`,
+    ),
+    doc(
+      p("types"),
+      "src/types.ts",
+      `export type TicketStatus =
+  | "idle"
+  | "running"
+  | "blocked"
+  | "failed"
+  | "succeeded";
+
+export interface Ticket {
+  id: string;
+  key: string;
+  title: string;
+  status: TicketStatus;
+}`,
+    ),
+    doc(
+      p("appshell"),
+      "src/components/AppShell.tsx",
+      `export function AppShell() {
+  return (
+    <div className="app-shell">
+      {/* queue + center + chat */}
+    </div>
+  );
+}`,
+    ),
+    doc(
+      p("queue"),
+      "src/components/TicketQueue.tsx",
+      `export function TicketQueue() {
+  return <aside className="queue" />;
+}`,
+    ),
+    doc(
+      p("detail"),
+      "src/components/TicketDetail.tsx",
+      `export function TicketDetail() {
+  return <div className="ticket-detail" />;
+}`,
+    ),
+    doc(
+      p("chat"),
+      "src/components/ChatPanel.tsx",
+      `export function ChatPanel() {
+  return <aside className="chat-panel" />;
+}`,
+    ),
+    doc(
+      p("hooks"),
+      "src/hooks/useTickets.ts",
+      `import { useState } from "react";
+import type { Ticket } from "../types";
+
+export function useTickets(initial: Ticket[]) {
+  const [tickets, setTickets] = useState(initial);
+  return { tickets, setTickets };
+}`,
+    ),
+    doc(
+      p("api"),
+      "src/lib/api.ts",
+      `export const api = {
+  async post<T>(path: string, body: unknown): Promise<T> {
+    const res = await fetch(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json() as Promise<T>;
+  },
+};`,
+    ),
+    doc(
+      p("tokens"),
+      "src/styles/tokens.css",
+      `:root {
+  --bg: #181818;
+  --panel: #141414;
+  --fg: #e8e4df;
+  --muted: #7a7268;
+}`,
+      "code",
+      "tokens.css",
+    ),
+    doc(
+      p("appcss"),
+      "src/styles/app.css",
+      `.app-shell {
+  display: grid;
+  grid-template-columns: 260px 1fr 400px;
+  height: 100vh;
+}`,
+      "code",
+      "app.css",
+    ),
+    doc(
+      p("fixture"),
+      "src/test/fixtures/tickets.json",
+      `[
+  { "key": "ENG-176", "title": "Empty inbox should show CTA" },
+  { "key": "ENG-214", "title": "Token refresh race" }
+]`,
+    ),
+    doc(
+      p("vitest"),
+      "src/test/setup.ts",
+      `import "@testing-library/jest-dom/vitest";`,
+    ),
+  ];
+
+  const api = [
+    doc(
+      p("pkg"),
+      "package.json",
+      `{
+  "name": "@acme/api",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "test": "vitest run"
+  }
+}`,
+    ),
+    doc(
+      p("server"),
+      "src/server.ts",
+      `import { createServer } from "./app";
+
+createServer().listen(3001);`,
+    ),
+    doc(
+      p("app"),
+      "src/app.ts",
+      `export function createServer() {
+  // hono / express app bootstrap
+  return { listen(port: number) { console.log(port); } };
+}`,
+    ),
+    doc(
+      p("routes"),
+      "src/routes/tickets.ts",
+      `export function ticketRoutes() {
+  return [];
+}`,
+    ),
+    doc(
+      p("mw"),
+      "src/middleware/auth.ts",
+      `export function requireAuth() {
+  return async () => {};
+}`,
+    ),
+    doc(
+      p("db"),
+      "src/db/client.ts",
+      `export const db = {
+  query: async () => [],
+};`,
+    ),
+    doc(
+      p("schema"),
+      "src/db/schema.sql",
+      `create table tickets (
+  id text primary key,
+  key text unique not null,
+  title text not null
+);`,
+    ),
+    doc(
+      p("readme"),
+      "README.md",
+      `# ${repoPath}
+
+API service scaffold for agent tickets.`,
+      "markdown",
+    ),
+    doc(
+      p("env"),
+      ".env.example",
+      `DATABASE_URL=postgres://localhost/acme
+PORT=3001`,
+      "notes",
+    ),
+  ];
+
+  const billing = [
+    doc(
+      p("pkg"),
+      "package.json",
+      `{
+  "name": "@acme/billing",
+  "private": true,
+  "type": "module"
+}`,
+    ),
+    doc(
+      p("index"),
+      "src/index.ts",
+      `export * from "./proration";
+export * from "./plans";`,
+    ),
+    doc(
+      p("plans"),
+      "src/plans.ts",
+      `export type Plan = "free" | "pro" | "enterprise";`,
+    ),
+    doc(
+      p("readme"),
+      "README.md",
+      `# ${repoPath}
+
+Billing primitives shared across apps.`,
+      "markdown",
+    ),
+  ];
+
+  const docs = [
+    doc(
+      p("readme"),
+      "README.md",
+      `# Docs
+
+Contributor and agent guidance.`,
+      "markdown",
+    ),
+    doc(
+      p("contributing"),
+      "CONTRIBUTING.md",
+      `# Contributing
+
+Open a draft PR early. Keep diffs small.`,
+      "markdown",
+    ),
+    doc(
+      p("agents"),
+      "AGENTS.md",
+      `# Agent defaults
+
+- network: off (opt-in)
+- prefer focused tests`,
+      "markdown",
+    ),
+  ];
+
+  if (repoPath.includes("billing")) return billing;
+  if (repoPath.includes("docs") || repoPath === "docs") return docs;
+  if (repoPath.includes("api") || repoPath.includes("workers")) return api;
+  return web;
+}
+
+/** Merge focus files over a fuller repo tree (focus paths win). */
+function mergeRepoDocuments(
+  ticketKey: string,
+  repoPath: string,
+  focus: TicketDocument[],
+): TicketDocument[] {
+  const scaffold = repoScaffold(ticketKey, repoPath);
+  const byPath = new Map<string, TicketDocument>();
+  for (const d of scaffold) byPath.set(d.path, d);
+  for (const d of focus) byPath.set(d.path, d);
+  return [...byPath.values()].sort((a, b) => a.path.localeCompare(b.path));
+}
+
 function delivery( partial: TicketDelivery): TicketDelivery {
   return partial;
 }
@@ -65,12 +446,13 @@ const idleRun: AgentRun = {
 
 const runningRun: AgentRun = {
   id: "run-auth-refresh",
-  status: "running",
+  status: "blocked",
+  blockedQuestion: "Open a draft PR, or wait for your review first?",
   filesChanged: ["src/auth/session.ts", "src/auth/refresh.ts"],
   stages: [
     { id: "investigate", label: "Investigate", status: "done" },
     { id: "implement", label: "Implement", status: "done" },
-    { id: "verify", label: "Verify", status: "active" },
+    { id: "verify", label: "Verify", status: "done" },
   ],
   timeline: [
     {
@@ -80,15 +462,25 @@ const runningRun: AgentRun = {
       content: "Fix the silent token refresh race on concurrent tabs.",
     },
     {
+      id: "a0",
+      type: "activity",
+      kind: "plan",
+      title: "Planning approach",
+      detail: "Locate race → single-flight lock → focused tests",
+      status: "done",
+    },
+    {
       id: "a1",
       type: "activity",
       kind: "search",
       title: "Searching codebase",
       detail: "token refresh OR refreshSession",
       status: "done",
+    },
+    {
+      id: "r1",
+      type: "result",
       evidenceId: "ev-search-1",
-      durationMs: 1840,
-      tokens: 620,
     },
     {
       id: "a2",
@@ -97,10 +489,26 @@ const runningRun: AgentRun = {
       title: "Reading file",
       detail: "src/auth/session.ts",
       status: "done",
+    },
+    {
+      id: "r2",
+      type: "result",
       evidenceId: "ev-file-1",
-      durationMs: 410,
-      tokens: 180,
-      filesChanged: ["src/auth/session.ts"],
+    },
+    {
+      id: "a2b",
+      type: "activity",
+      kind: "read",
+      title: "Reading file",
+      detail: "src/hooks/useAuth.ts",
+      status: "done",
+    },
+    {
+      id: "m1b",
+      type: "message",
+      role: "assistant",
+      content:
+        "Race is in `refreshSession` — concurrent tabs each start their own refresh. I'll add a shared in-flight promise.",
     },
     {
       id: "a3",
@@ -109,28 +517,81 @@ const runningRun: AgentRun = {
       title: "Editing code",
       detail: "src/auth/refresh.ts",
       status: "done",
-      evidenceId: "ev-diff-1",
-      durationMs: 3200,
-      tokens: 1450,
-      filesChanged: ["src/auth/refresh.ts"],
     },
     {
-      id: "a4",
+      id: "r3",
+      type: "result",
+      evidenceId: "ev-diff-1",
+    },
+    {
+      id: "a3c",
+      type: "activity",
+      kind: "edit",
+      title: "Editing code",
+      detail: "src/auth/session.ts",
+      status: "done",
+    },
+    {
+      id: "r3b",
+      type: "result",
+      evidenceId: "ev-diff-2",
+    },
+    {
+      id: "a3b",
+      type: "activity",
+      kind: "lint",
+      title: "Running linter",
+      detail: "tsc --noEmit -p apps/web",
+      status: "done",
+    },
+    {
+      id: "a-term",
       type: "activity",
       kind: "terminal",
       title: "Running command",
       detail: "pnpm test src/auth/refresh.test.ts",
-      status: "running",
+      status: "done",
+    },
+    {
+      id: "r-term",
+      type: "result",
       evidenceId: "ev-term-1",
-      durationMs: 6800,
-      tokens: 90,
+    },
+    {
+      id: "a4",
+      type: "activity",
+      kind: "test",
+      title: "Running tests",
+      detail: "src/auth/refresh.test.ts",
+      status: "done",
+    },
+    {
+      id: "r-tests",
+      type: "result",
+      evidenceId: "ev-tests-1",
+    },
+    {
+      id: "a-git",
+      type: "activity",
+      kind: "git",
+      title: "Creating commit",
+      detail: "fix: single-flight lock for token refresh",
+      status: "done",
+    },
+    {
+      id: "a-ask",
+      type: "activity",
+      kind: "ask",
+      title: "Asking user",
+      detail: "Open a draft PR, or wait for your review first?",
+      status: "waiting",
     },
     {
       id: "m2",
       type: "message",
       role: "assistant",
       content:
-        "Added a single-flight lock around refresh so concurrent tabs share one in-flight request. Waiting on unit tests.",
+        "Single-flight lock is in place and unit tests pass. Want me to open a draft PR?",
     },
   ],
   evidence: [
@@ -281,6 +742,10 @@ const blockedRun: AgentRun = {
       title: "Reading file",
       detail: "src/middleware/index.ts",
       status: "done",
+    },
+    {
+      id: "b-a1-result",
+      type: "result",
       evidenceId: "ev-b-file",
     },
     {
@@ -290,6 +755,10 @@ const blockedRun: AgentRun = {
       title: "Editing code",
       detail: "src/middleware/rateLimit.ts",
       status: "done",
+    },
+    {
+      id: "b-a2-result",
+      type: "result",
       evidenceId: "ev-b-diff",
     },
     {
@@ -384,6 +853,10 @@ const blockedResolvedRun: AgentRun = {
       title: "Editing code",
       detail: "src/routes/public.ts",
       status: "done",
+    },
+    {
+      id: "br-a2-result",
+      type: "result",
       evidenceId: "ev-br-diff",
     },
     {
@@ -393,6 +866,10 @@ const blockedResolvedRun: AgentRun = {
       title: "Running tests",
       detail: "src/middleware/rateLimit.test.ts",
       status: "done",
+    },
+    {
+      id: "br-a3-result",
+      type: "result",
       evidenceId: "ev-br-tests",
     },
     {
@@ -463,6 +940,10 @@ const failedRun: AgentRun = {
       title: "Reading file",
       detail: "src/export/csv.ts",
       status: "done",
+    },
+    {
+      id: "f-a1-result",
+      type: "result",
       evidenceId: "ev-f-file",
     },
     {
@@ -472,6 +953,10 @@ const failedRun: AgentRun = {
       title: "Editing code",
       detail: "src/export/csv.ts",
       status: "done",
+    },
+    {
+      id: "f-a2-result",
+      type: "result",
       evidenceId: "ev-f-diff",
     },
     {
@@ -481,6 +966,10 @@ const failedRun: AgentRun = {
       title: "Running tests",
       detail: "src/export/csv.test.ts",
       status: "failed",
+    },
+    {
+      id: "f-a3-result",
+      type: "result",
       evidenceId: "ev-f-tests",
     },
     {
@@ -490,6 +979,10 @@ const failedRun: AgentRun = {
       title: "Fixing errors",
       detail: "Retry 2/3 — buffer overflow",
       status: "failed",
+    },
+    {
+      id: "f-a4-result",
+      type: "result",
       evidenceId: "ev-f-term",
     },
     {
@@ -597,6 +1090,10 @@ const succeededRun: AgentRun = {
       title: "Searching codebase",
       detail: "EmptyState OR empty inbox",
       status: "done",
+    },
+    {
+      id: "s-a1-result",
+      type: "result",
       evidenceId: "ev-s-search",
     },
     {
@@ -606,6 +1103,10 @@ const succeededRun: AgentRun = {
       title: "Editing code",
       detail: "src/components/EmptyState.tsx",
       status: "done",
+    },
+    {
+      id: "s-a2-result",
+      type: "result",
       evidenceId: "ev-s-diff",
     },
     {
@@ -615,6 +1116,10 @@ const succeededRun: AgentRun = {
       title: "Running tests",
       detail: "src/components/EmptyState.test.tsx",
       status: "done",
+    },
+    {
+      id: "s-a3-result",
+      type: "result",
       evidenceId: "ev-s-tests",
     },
     {
@@ -708,6 +1213,10 @@ const runningScript: AgentRun = {
       title: "Reading file",
       detail: "src/billing/proration.ts",
       status: "done",
+    },
+    {
+      id: "sc-a1-result",
+      type: "result",
       evidenceId: "ev-sc-file",
     },
     {
@@ -717,6 +1226,10 @@ const runningScript: AgentRun = {
       title: "Editing code",
       detail: "src/billing/proration.ts",
       status: "done",
+    },
+    {
+      id: "sc-a2-result",
+      type: "result",
       evidenceId: "ev-sc-diff",
     },
     {
@@ -726,6 +1239,10 @@ const runningScript: AgentRun = {
       title: "Running tests",
       detail: "src/billing/proration.test.ts",
       status: "done",
+    },
+    {
+      id: "sc-a3-result",
+      type: "result",
       evidenceId: "ev-sc-tests",
     },
     {
@@ -779,7 +1296,7 @@ const runningScript: AgentRun = {
   },
 };
 
-export const initialTickets: Ticket[] = [
+export const initialTickets: Ticket[] = ([
   {
     id: "t1",
     key: "ENG-214",
@@ -794,7 +1311,7 @@ export const initialTickets: Ticket[] = [
     repoPath: "apps/web",
     branch: "agent/eng-214-refresh-race",
     priority: "high",
-    status: "running",
+    status: "blocked",
     assignee: "agent",
     documents: [
       specDoc(
@@ -1207,7 +1724,650 @@ policy override — see AGENTS.md.`,
       ],
     },
   },
-];
+  {
+    id: "t7",
+    key: "ENG-233",
+    title: "Webhook retries drop on 5xx from partner",
+    description:
+      "Partner callbacks that return 502 are not requeued. Delivery logs show a single attempt then silence.",
+    criteria: [
+      "5xx responses retry with backoff",
+      "Dead-letter after max attempts",
+      "No duplicate side effects on success",
+    ],
+    repoPath: "apps/api",
+    branch: "main",
+    priority: "high",
+    status: "idle",
+    assignee: "unassigned",
+    documents: [
+      specDoc(
+        "ENG-233",
+        `# ENG-233 — Webhook retry on partner 5xx
+
+Partner callbacks returning 502 are not requeued. Add backoff retries
+and a dead-letter path after max attempts.`,
+      ),
+    ],
+    delivery: delivery({
+      prNumber: null,
+      prStatus: "none",
+      commitSha: null,
+      commitMessage: null,
+      comments: [],
+    }),
+    run: idleRun,
+  },
+  {
+    id: "t8",
+    key: "ENG-229",
+    title: "Search index lags after bulk import",
+    description:
+      "After CSV import of >5k customers, search stays stale for several minutes. Suspect async indexing queue backlog.",
+    criteria: [
+      "Bulk import enqueues index jobs in batches",
+      "Search freshness under 30s for 10k rows",
+      "Import UI shows indexing progress",
+    ],
+    repoPath: "apps/api",
+    branch: "agent/eng-229-search-index",
+    priority: "medium",
+    status: "running",
+    assignee: "agent",
+    documents: [
+      specDoc(
+        "ENG-229",
+        `# ENG-229 — Search index lag after bulk import
+
+Bulk customer imports leave search stale. Batch index jobs and surface
+progress in the import UI.`,
+      ),
+    ],
+    delivery: delivery({
+      prNumber: 501,
+      prStatus: "draft",
+      prUrl: "#pr-501",
+      commitSha: "c8e12a0",
+      commitMessage: "fix(search): batch index jobs after bulk import",
+      comments: [],
+    }),
+    run: {
+      id: "run-search-index",
+      status: "running",
+      filesChanged: ["src/search/indexer.ts", "src/import/bulk.ts"],
+      stages: [
+        { id: "investigate", label: "Investigate", status: "done" },
+        { id: "implement", label: "Implement", status: "active" },
+        { id: "verify", label: "Verify", status: "pending" },
+      ],
+      timeline: [
+        {
+          id: "si-m1",
+          type: "message",
+          role: "user",
+          content: "Fix search lag after large CSV imports.",
+        },
+        {
+          id: "si-a1",
+          type: "activity",
+          kind: "search",
+          title: "Searching codebase",
+          detail: "bulk import OR indexer",
+          status: "done",
+        },
+        {
+          id: "si-a2",
+          type: "activity",
+          kind: "edit",
+          title: "Editing code",
+          detail: "src/search/indexer.ts",
+          status: "running",
+        },
+      ],
+      evidence: [],
+    },
+  },
+  {
+    id: "t9",
+    key: "ENG-218",
+    title: "Dark mode flash on first paint",
+    description:
+      "Theme preference is read after hydration, so light theme flashes briefly for dark-mode users.",
+    criteria: [
+      "No light flash when preference is dark",
+      "Works with system preference and stored override",
+      "No layout shift from theme script",
+    ],
+    repoPath: "apps/web",
+    branch: "main",
+    priority: "low",
+    status: "idle",
+    assignee: "unassigned",
+    documents: [
+      specDoc(
+        "ENG-218",
+        `# ENG-218 — Dark mode first-paint flash
+
+Read theme preference before paint so dark-mode users do not see a
+light flash on load.`,
+      ),
+    ],
+    delivery: delivery({
+      prNumber: null,
+      prStatus: "none",
+      commitSha: null,
+      commitMessage: null,
+      comments: [],
+    }),
+    run: idleRun,
+  },
+  {
+    id: "t10",
+    key: "ENG-212",
+    title: "Invite link expires too aggressively",
+    description:
+      "Team invites expire after 1 hour. Product wants 7 days with a one-time consume on accept.",
+    criteria: [
+      "Invite TTL is 7 days",
+      "Link is single-use after accept",
+      "Expired links show a clear error",
+    ],
+    repoPath: "apps/api",
+    branch: "main",
+    priority: "medium",
+    status: "idle",
+    assignee: "unassigned",
+    documents: [
+      specDoc(
+        "ENG-212",
+        `# ENG-212 — Invite link TTL
+
+Extend invite expiry to 7 days and keep single-use consume on accept.`,
+      ),
+    ],
+    delivery: delivery({
+      prNumber: null,
+      prStatus: "none",
+      commitSha: null,
+      commitMessage: null,
+      comments: [],
+    }),
+    run: idleRun,
+  },
+  {
+    id: "t11",
+    key: "ENG-207",
+    title: "Audit log missing actor on API key calls",
+    description:
+      "Actions authenticated with API keys record actor as null. Attribute to the key owner or key name.",
+    criteria: [
+      "API key requests set actor in audit events",
+      "UI shows key name when user is absent",
+      "Backfill not required for historical rows",
+    ],
+    repoPath: "apps/api",
+    branch: "agent/eng-207-audit-actor",
+    priority: "high",
+    status: "succeeded",
+    assignee: "agent",
+    documents: [
+      specDoc(
+        "ENG-207",
+        `# ENG-207 — Audit actor for API keys
+
+Attribute API-key-authenticated actions to the key owner or key name
+in the audit log.`,
+      ),
+    ],
+    delivery: delivery({
+      prNumber: 495,
+      prStatus: "open",
+      prUrl: "#pr-495",
+      commitSha: "f1a90e3",
+      commitMessage: "fix(audit): set actor for API key requests",
+      comments: [
+        {
+          id: "c-audit",
+          author: "priya",
+          body: "Looks good — merge after CI.",
+          createdAt: "40m ago",
+        },
+      ],
+    }),
+    run: {
+      id: "run-audit-actor",
+      status: "succeeded",
+      filesChanged: ["src/audit/log.ts", "src/auth/apiKey.ts"],
+      stages: [
+        { id: "investigate", label: "Investigate", status: "done" },
+        { id: "implement", label: "Implement", status: "done" },
+        { id: "verify", label: "Verify", status: "done" },
+      ],
+      timeline: [
+        {
+          id: "aa-m1",
+          type: "message",
+          role: "user",
+          content: "Fix missing actor on API key audit events.",
+        },
+        {
+          id: "aa-a1",
+          type: "activity",
+          kind: "edit",
+          title: "Editing code",
+          detail: "src/audit/log.ts",
+          status: "done",
+        },
+        {
+          id: "aa-a2",
+          type: "activity",
+          kind: "test",
+          title: "Running tests",
+          detail: "src/audit/log.test.ts",
+          status: "done",
+        },
+      ],
+      evidence: [
+        {
+          id: "ev-aa-diff",
+          kind: "diff",
+          path: "src/audit/log.ts",
+          content: `@@ -12,6 +12,9 @@
+ export function writeAudit(event: AuditEvent) {
+-  const actor = event.userId ?? null;
++  const actor =
++    event.userId ??
++    event.apiKey?.ownerId ??
++    event.apiKey?.name ??
++    null;
+   return db.audit.insert({ ...event, actor });
+ }`,
+        },
+      ],
+      performance: {
+        criteriaMet: true,
+        timeSec: 94,
+        testsPassed: 8,
+        testsTotal: 8,
+        errors: 0,
+        retries: 0,
+        qualityScore: 0.93,
+        tokens: 9200,
+        costUsd: 0.21,
+        adherence: 0.97,
+      },
+    },
+  },
+  ...([
+    {
+      id: "t12",
+      key: "ENG-241",
+      title: "Pagination cursor skips rows under concurrent writes",
+      priority: "high" as const,
+      status: "idle" as const,
+      repoPath: "apps/api",
+      description:
+        "List endpoints using keyset pagination drop rows when inserts land between pages.",
+    },
+    {
+      id: "t13",
+      key: "ENG-240",
+      title: "Sentry sourcemaps missing for worker builds",
+      priority: "medium" as const,
+      status: "idle" as const,
+      repoPath: "apps/workers",
+      description:
+        "Worker releases upload without maps, so production stack traces are minified.",
+    },
+    {
+      id: "t14",
+      key: "ENG-238",
+      title: "Timezone-aware reminders fire an hour early",
+      priority: "high" as const,
+      status: "idle" as const,
+      repoPath: "packages/notify",
+      description:
+        "DST transitions shift reminder jobs by one hour for US/Pacific users.",
+    },
+    {
+      id: "t15",
+      key: "ENG-236",
+      title: "Feature flag cache never invalidates on write",
+      priority: "medium" as const,
+      status: "running" as const,
+      repoPath: "apps/api",
+      description:
+        "Flag updates take up to TTL to appear. Invalidate on admin write path.",
+    },
+    {
+      id: "t16",
+      key: "ENG-235",
+      title: "Mobile nav overlaps sticky table headers",
+      priority: "low" as const,
+      status: "idle" as const,
+      repoPath: "apps/web",
+      description:
+        "On narrow viewports the bottom nav covers the last sticky header row.",
+    },
+    {
+      id: "t17",
+      key: "ENG-234",
+      title: "OAuth state param not bound to session",
+      priority: "high" as const,
+      status: "blocked" as const,
+      repoPath: "apps/web",
+      description:
+        "Login can complete with a forged state if the cookie is missing. Confirm bind strategy.",
+    },
+    {
+      id: "t18",
+      key: "ENG-232",
+      title: "Chart tooltips clip at panel edges",
+      priority: "low" as const,
+      status: "idle" as const,
+      repoPath: "packages/ui",
+      description:
+        "Recharts tooltips render outside overflow:hidden panels and get cropped.",
+    },
+    {
+      id: "t19",
+      key: "ENG-231",
+      title: "Retry storm after redis brief outage",
+      priority: "high" as const,
+      status: "failed" as const,
+      repoPath: "apps/api",
+      description:
+        "Clients retry in lockstep when redis returns. Add jittered backoff.",
+    },
+    {
+      id: "t20",
+      key: "ENG-230",
+      title: "Copy button announces wrong for screen readers",
+      priority: "low" as const,
+      status: "idle" as const,
+      repoPath: "packages/ui",
+      description:
+        "Clipboard actions say 'copied' permanently. Reset live region after timeout.",
+    },
+    {
+      id: "t21",
+      key: "ENG-228",
+      title: "Invoice PDF fonts fail on Alpine images",
+      priority: "medium" as const,
+      status: "idle" as const,
+      repoPath: "apps/api",
+      description:
+        "Puppeteer PDF generation lacks fonts in Alpine; invoices render boxes.",
+    },
+    {
+      id: "t22",
+      key: "ENG-227",
+      title: "Stale React Query keys after org switch",
+      priority: "medium" as const,
+      status: "succeeded" as const,
+      repoPath: "apps/web",
+      description:
+        "Switching org leaves previous org data visible until hard refresh.",
+    },
+    {
+      id: "t23",
+      key: "ENG-226",
+      title: "Websocket reconnect floods presence channel",
+      priority: "high" as const,
+      status: "idle" as const,
+      repoPath: "apps/api",
+      description:
+        "On flaky networks clients rejoin presence many times per second.",
+    },
+    {
+      id: "t24",
+      key: "ENG-225",
+      title: "Email preference center ignores marketing opt-out",
+      priority: "medium" as const,
+      status: "idle" as const,
+      repoPath: "apps/api",
+      description:
+        "Marketing campaigns still send after users opt out in settings.",
+    },
+    {
+      id: "t25",
+      key: "ENG-224",
+      title: "Storybook a11y addon breaks on React 19",
+      priority: "low" as const,
+      status: "idle" as const,
+      repoPath: "packages/ui",
+      description:
+        "Addon crashes during composeDocs. Pin compatible version or patch.",
+    },
+    {
+      id: "t26",
+      key: "ENG-223",
+      title: "Background job metrics missing queue depth",
+      priority: "medium" as const,
+      status: "running" as const,
+      repoPath: "apps/workers",
+      description:
+        "Ops dashboards need queue depth and lag for billing workers.",
+    },
+    {
+      id: "t27",
+      key: "ENG-222",
+      title: "SSO login loses return URL with nested paths",
+      priority: "high" as const,
+      status: "idle" as const,
+      repoPath: "apps/web",
+      description:
+        "Deep links under /settings/* redirect to home after SSO completes.",
+    },
+    {
+      id: "t28",
+      key: "ENG-220",
+      title: "CSV import accepts duplicate external IDs",
+      priority: "medium" as const,
+      status: "idle" as const,
+      repoPath: "apps/api",
+      description:
+        "Import should reject or merge rows with duplicate external_id.",
+    },
+    {
+      id: "t29",
+      key: "ENG-219",
+      title: "Keyboard focus trap in command palette",
+      priority: "low" as const,
+      status: "succeeded" as const,
+      repoPath: "apps/web",
+      description:
+        "Tab cycles inside the palette but Escape does not restore focus.",
+    },
+    {
+      id: "t30",
+      key: "ENG-217",
+      title: "Health check reports healthy during migration lock",
+      priority: "high" as const,
+      status: "idle" as const,
+      repoPath: "apps/api",
+      description:
+        "Readiness should fail while schema migrations hold an exclusive lock.",
+    },
+    {
+      id: "t31",
+      key: "ENG-216",
+      title: "Avatar uploads reject valid HEIC from iOS",
+      priority: "low" as const,
+      status: "idle" as const,
+      repoPath: "apps/api",
+      description:
+        "MIME sniffing rejects image/heic. Convert or accept with server convert.",
+    },
+    {
+      id: "t32",
+      key: "ENG-215",
+      title: "Plan change webhook unsigned in staging",
+      priority: "medium" as const,
+      status: "blocked" as const,
+      repoPath: "apps/api",
+      description:
+        "Staging Stripe webhook secret is empty. Confirm secret injection path.",
+    },
+  ] as const).map((t) => ({
+    id: t.id,
+    key: t.key,
+    title: t.title,
+    description: t.description,
+    criteria: [
+      "Reproduced against a fixture",
+      "Covered by a focused test or check",
+      "No unrelated refactors",
+    ],
+    repoPath: t.repoPath,
+    branch: t.status === "idle" ? "main" : `agent/${t.key.toLowerCase()}`,
+    priority: t.priority,
+    status: t.status,
+    assignee:
+      t.status === "idle" || t.status === "blocked"
+        ? t.status === "blocked"
+          ? "agent"
+          : "unassigned"
+        : "agent",
+    documents: [
+      specDoc(
+        t.key,
+        `# ${t.key} — ${t.title}\n\n${t.description}`,
+      ),
+    ],
+    delivery: delivery({
+      prNumber: null,
+      prStatus: "none",
+      commitSha: null,
+      commitMessage: null,
+      comments: [],
+    }),
+    run:
+      t.status === "running"
+        ? {
+            ...idleRun,
+            id: `run-${t.id}`,
+            status: "running" as const,
+            stages: [
+              { id: "investigate" as const, label: "Investigate", status: "done" as const },
+              { id: "implement" as const, label: "Implement", status: "active" as const },
+              { id: "verify" as const, label: "Verify", status: "pending" as const },
+            ],
+            timeline: [
+              {
+                id: `${t.id}-m1`,
+                type: "message" as const,
+                role: "user" as const,
+                content: t.title,
+              },
+              {
+                id: `${t.id}-a1`,
+                type: "activity" as const,
+                kind: "search" as const,
+                title: "Searching codebase",
+                detail: t.key.toLowerCase(),
+                status: "done" as const,
+              },
+              {
+                id: `${t.id}-a2`,
+                type: "activity" as const,
+                kind: "edit" as const,
+                title: "Editing code",
+                detail: `${t.repoPath}/…`,
+                status: "running" as const,
+              },
+            ],
+          }
+        : t.status === "failed"
+          ? {
+              ...idleRun,
+              id: `run-${t.id}`,
+              status: "failed" as const,
+              timeline: [
+                {
+                  id: `${t.id}-m1`,
+                  type: "message" as const,
+                  role: "user" as const,
+                  content: t.title,
+                },
+                {
+                  id: `${t.id}-a1`,
+                  type: "activity" as const,
+                  kind: "test" as const,
+                  title: "Running tests",
+                  detail: "failed",
+                  status: "failed" as const,
+                },
+              ],
+            }
+          : t.status === "succeeded"
+            ? {
+                ...idleRun,
+                id: `run-${t.id}`,
+                status: "succeeded" as const,
+                stages: [
+                  { id: "investigate" as const, label: "Investigate", status: "done" as const },
+                  { id: "implement" as const, label: "Implement", status: "done" as const },
+                  { id: "verify" as const, label: "Verify", status: "done" as const },
+                ],
+                timeline: [
+                  {
+                    id: `${t.id}-m1`,
+                    type: "message" as const,
+                    role: "user" as const,
+                    content: t.title,
+                  },
+                  {
+                    id: `${t.id}-a1`,
+                    type: "activity" as const,
+                    kind: "edit" as const,
+                    title: "Editing code",
+                    detail: "done",
+                    status: "done" as const,
+                  },
+                ],
+                performance: {
+                  criteriaMet: true,
+                  timeSec: 80,
+                  testsPassed: 4,
+                  testsTotal: 4,
+                  errors: 0,
+                  retries: 0,
+                  qualityScore: 0.9,
+                  tokens: 6000,
+                  costUsd: 0.12,
+                  adherence: 0.95,
+                },
+              }
+            : t.status === "blocked"
+              ? {
+                  ...idleRun,
+                  id: `run-${t.id}`,
+                  status: "blocked" as const,
+                  blockedQuestion: "Confirm approach before continuing?",
+                  timeline: [
+                    {
+                      id: `${t.id}-m1`,
+                      type: "message" as const,
+                      role: "user" as const,
+                      content: t.title,
+                    },
+                    {
+                      id: `${t.id}-a1`,
+                      type: "activity" as const,
+                      kind: "ask" as const,
+                      title: "Waiting on you",
+                      detail: "Need a decision",
+                      status: "waiting" as const,
+                    },
+                  ],
+                }
+              : { ...idleRun, id: `run-${t.id}` },
+  })),
+]).map((t) => ({
+  ...t,
+  documents: mergeRepoDocuments(t.key, t.repoPath, t.documents),
+}));
 
 export const idleStartScripts: Record<string, AgentRun> = {
   t3: {
@@ -1233,6 +2393,10 @@ export const idleStartScripts: Record<string, AgentRun> = {
         title: "Editing code",
         detail: "src/export/csv.ts",
         status: "done",
+      },
+      {
+        id: "fr-a1-result",
+        type: "result",
         evidenceId: "ev-fr-diff",
       },
       {
@@ -1242,6 +2406,10 @@ export const idleStartScripts: Record<string, AgentRun> = {
         title: "Running tests",
         detail: "src/export/csv.test.ts",
         status: "done",
+      },
+      {
+        id: "fr-a2-result",
+        type: "result",
         evidenceId: "ev-fr-tests",
       },
       {
@@ -1327,6 +2495,10 @@ export const idleStartScripts: Record<string, AgentRun> = {
         title: "Reading file",
         detail: "AGENTS.md",
         status: "done",
+      },
+      {
+        id: "d-a1-result",
+        type: "result",
         evidenceId: "ev-d-file",
       },
       {
@@ -1336,6 +2508,10 @@ export const idleStartScripts: Record<string, AgentRun> = {
         title: "Editing code",
         detail: "AGENTS.md",
         status: "done",
+      },
+      {
+        id: "d-a2-result",
+        type: "result",
         evidenceId: "ev-d-diff",
       },
       {
@@ -1380,6 +2556,24 @@ export const idleStartScripts: Record<string, AgentRun> = {
       costUsd: 0.09,
       adherence: 1,
     },
+  },
+  t7: {
+    ...runningScript,
+    id: "run-webhook-retry",
+    status: "succeeded",
+    filesChanged: ["src/webhooks/dispatch.ts"],
+  },
+  t9: {
+    ...runningScript,
+    id: "run-theme-flash",
+    status: "succeeded",
+    filesChanged: ["src/theme/bootstrap.ts"],
+  },
+  t10: {
+    ...runningScript,
+    id: "run-invite-ttl",
+    status: "succeeded",
+    filesChanged: ["src/invites/token.ts"],
   },
 };
 

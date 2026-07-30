@@ -1,6 +1,16 @@
 import type { FileEvidence } from "../../types";
 
-export function FileView({ evidence }: { evidence: FileEvidence }) {
+export function FileView({
+  evidence,
+  compact = false,
+}: {
+  evidence: FileEvidence;
+  compact?: boolean;
+}) {
+  if (compact) {
+    return <pre className="code-block bare">{evidence.content}</pre>;
+  }
+
   return (
     <div className="evidence-panel">
       <div className="evidence-header">

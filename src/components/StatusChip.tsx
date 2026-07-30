@@ -1,4 +1,4 @@
-import type { ActivityStatus, TicketStatus } from "../types";
+import type { ActivityStatus, Priority, TicketStatus } from "../types";
 
 const labels: Record<TicketStatus, string> = {
   idle: "Idle",
@@ -13,6 +13,12 @@ const activityLabels: Record<ActivityStatus, string> = {
   done: "Done",
   failed: "Failed",
   waiting: "Waiting",
+};
+
+const priorityLabels: Record<Priority, string> = {
+  high: "High",
+  medium: "Medium",
+  low: "Low",
 };
 
 function IconIdle() {
@@ -99,6 +105,60 @@ function IconCheck() {
   );
 }
 
+/** Signal-bar priority marks — Linear-style high / medium / low. */
+function IconPriorityHigh() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden>
+      <path
+        d="M3.5 11.5v-2M8 11.5V6.5M12.5 11.5V4"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function IconPriorityMedium() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden>
+      <path
+        d="M3.5 11.5v-2M8 11.5V6.5"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        strokeLinecap="round"
+      />
+      <path
+        d="M12.5 11.5V4"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        strokeLinecap="round"
+        strokeOpacity="0.28"
+      />
+    </svg>
+  );
+}
+
+function IconPriorityLow() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden>
+      <path
+        d="M3.5 11.5v-2"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        strokeLinecap="round"
+      />
+      <path
+        d="M8 11.5V6.5M12.5 11.5V4"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        strokeLinecap="round"
+        strokeOpacity="0.28"
+      />
+    </svg>
+  );
+}
+
 function ticketIcon(status: TicketStatus) {
   switch (status) {
     case "running":
@@ -127,6 +187,17 @@ function activityIcon(status: ActivityStatus) {
   }
 }
 
+function priorityIcon(priority: Priority) {
+  switch (priority) {
+    case "high":
+      return <IconPriorityHigh />;
+    case "medium":
+      return <IconPriorityMedium />;
+    case "low":
+      return <IconPriorityLow />;
+  }
+}
+
 export function StatusChip({ status }: { status: TicketStatus }) {
   return (
     <span
@@ -135,6 +206,18 @@ export function StatusChip({ status }: { status: TicketStatus }) {
       aria-label={labels[status]}
     >
       {ticketIcon(status)}
+    </span>
+  );
+}
+
+export function PriorityIcon({ priority }: { priority: Priority }) {
+  return (
+    <span
+      className={`priority-icon priority-${priority}`}
+      title={priorityLabels[priority]}
+      aria-label={priorityLabels[priority]}
+    >
+      {priorityIcon(priority)}
     </span>
   );
 }

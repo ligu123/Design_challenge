@@ -1,14 +1,15 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type {
   Evidence,
+  Priority,
   PrStatus,
   ReviewDecision,
   Ticket,
-  TicketDocument,
 } from "../types";
 import { DiffCodeBlock, summarizeDiff } from "./DiffCodeBlock";
+import { DocsBrowser } from "./DocsBrowser";
 import { EvidencePanel } from "./evidence/EvidencePanel";
-import { StatusChip } from "./StatusChip";
+import { PriorityIcon, StatusChip } from "./StatusChip";
 
 interface TicketDetailProps {
   ticket: Ticket;
@@ -18,9 +19,172 @@ interface TicketDetailProps {
   starting?: boolean;
   decision?: ReviewDecision;
   onDecide?: (decision: ReviewDecision) => void;
+  onChangePriority?: (priority: Priority) => void;
+  onChangeAssignee?: (assignee: string) => void;
+  onAddComment?: (body: string, parentId?: string) => void;
+  onDeleteComment?: (commentId: string) => void;
 }
 
+const COMMENT_AUTHOR = "maya";
+
 type CenterTab = "ticket" | "documents" | "tests" | "evidence";
+
+const PRIORITY_OPTIONS: Priority[] = ["high", "medium", "low"];
+const ASSIGNEE_OPTIONS = ["agent", "unassigned", "maya", "jordan"] as const;
+
+function MetaChevron() {
+  return (
+    <svg
+      className="ticket-meta-chevron"
+      width="10"
+      height="10"
+      viewBox="0 0 16 16"
+      fill="none"
+      aria-hidden
+    >
+      <path
+        d="M4 6.5 8 10.5 12 6.5"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function MetaBranchIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden>
+      <circle cx="5" cy="4" r="1.75" stroke="currentColor" strokeWidth="1.4" />
+      <circle cx="5" cy="12" r="1.75" stroke="currentColor" strokeWidth="1.4" />
+      <circle cx="11.5" cy="8" r="1.75" stroke="currentColor" strokeWidth="1.4" />
+      <path
+        d="M5 5.75v4.5M6.6 5.1 10 7.1"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function MetaRepoIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden>
+      <path
+        d="M3.5 4.5h9v8.25a1 1 0 0 1-1 1h-7a1 1 0 0 1-1-1V4.5Z"
+        stroke="currentColor"
+        strokeWidth="1.4"
+      />
+      <path
+        d="M3.5 4.5 5.2 2.5h5.6l1.7 2"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function MetaAssigneeIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden>
+      <circle cx="8" cy="6" r="2.4" stroke="currentColor" strokeWidth="1.4" />
+      <path
+        d="M3.8 13.2c.7-2.2 2.2-3.3 4.2-3.3s3.5 1.1 4.2 3.3"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function MetaSelect<T extends string>({
+  value,
+  options,
+  label,
+  renderIcon,
+  renderOptionLabel,
+  onChange,
+}: {
+  value: T;
+  options: readonly T[];
+  label: string;
+  renderIcon: (v: T) => ReactNode;
+  renderOptionLabel?: (v: T) => string;
+  onChange: (v: T) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (e: PointerEvent) => {
+      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("pointerdown", onPointerDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  return (
+    <div className={`ticket-meta-select${open ? " open" : ""}`} ref={rootRef}>
+      <button
+        type="button"
+        className={`ticket-meta-badge ticket-meta-badge-${toneClass(value)}`}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label={label}
+        title={label}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span className="ticket-meta-badge-icon">{renderIcon(value)}</span>
+        <span className="ticket-meta-badge-label">
+          {renderOptionLabel?.(value) ?? value}
+        </span>
+        <MetaChevron />
+      </button>
+      {open ? (
+        <ul className="ticket-meta-menu" role="listbox" aria-label={label}>
+          {options.map((opt) => (
+            <li key={opt} role="option" aria-selected={opt === value}>
+              <button
+                type="button"
+                className={`ticket-meta-menu-item${opt === value ? " selected" : ""} ticket-meta-badge-${toneClass(opt)}`}
+                onClick={() => {
+                  onChange(opt);
+                  setOpen(false);
+                }}
+              >
+                <span className="ticket-meta-badge-icon">{renderIcon(opt)}</span>
+                <span className="ticket-meta-badge-label">
+                  {renderOptionLabel?.(opt) ?? opt}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
+function toneClass(value: string): string {
+  if (value === "high" || value === "medium" || value === "low") return value;
+  if (value === "agent") return "agent";
+  if (value === "unassigned") return "unassigned";
+  if (value === "maya") return "maya";
+  if (value === "jordan") return "jordan";
+  return "neutral";
+}
 
 function evidenceForPath(evidence: Evidence[], path: string): Evidence | null {
   return (
@@ -33,19 +197,6 @@ function evidenceForPath(evidence: Evidence[], path: string): Evidence | null {
 function latestTestEvidence(evidence: Evidence[]): Evidence | null {
   const tests = evidence.filter((e) => e.kind === "tests");
   return tests.length ? tests[tests.length - 1] : null;
-}
-
-function docKindLabel(kind: TicketDocument["kind"]) {
-  switch (kind) {
-    case "spec":
-      return "spec";
-    case "markdown":
-      return "md";
-    case "notes":
-      return "notes";
-    default:
-      return "code";
-  }
 }
 
 function prStatusLabel(status: PrStatus) {
@@ -77,32 +228,57 @@ type IssueEvent =
       kind: "commit";
       sha: string;
       message: string;
-      at?: string;
+      atMs: number;
     }
   | {
       id: string;
       kind: "pr";
       number: number;
       status: PrStatus;
-      at?: string;
+      atMs: number;
     }
   | {
       id: string;
       kind: "branch";
       name: string;
-      at?: string;
+      atMs: number;
     };
 
-function buildIssueEvents(ticket: Ticket): IssueEvent[] {
+const MINUTE = 60_000;
+const HOUR = 60 * MINUTE;
+const DAY = 24 * HOUR;
+
+/** Looking-back relative time: "just now", "5 minutes", "1 hour", "2 days". */
+function formatRelativeTime(atMs: number, nowMs: number) {
+  const diff = Math.max(0, nowMs - atMs);
+  if (diff < MINUTE) return "just now";
+  if (diff < HOUR) {
+    const n = Math.floor(diff / MINUTE);
+    return n === 1 ? "1 minute" : `${n} minutes`;
+  }
+  if (diff < DAY) {
+    const n = Math.floor(diff / HOUR);
+    return n === 1 ? "1 hour" : `${n} hours`;
+  }
+  if (diff < 30 * DAY) {
+    const n = Math.floor(diff / DAY);
+    return n === 1 ? "1 day" : `${n} days`;
+  }
+  const n = Math.floor(diff / (30 * DAY));
+  return n === 1 ? "1 month" : `${n} months`;
+}
+
+function buildIssueEvents(ticket: Ticket, nowMs: number): IssueEvent[] {
   const { delivery, branch } = ticket;
   const events: IssueEvent[] = [];
 
+  // Stagger mock ages so the timeline reads as a real looking-back history.
   if (branch && branch !== "main") {
     events.push({
       id: `branch-${ticket.id}`,
       kind: "branch",
       name: branch,
-      at: "earlier",
+      atMs: nowMs - 2 * DAY - 3 * HOUR,
     });
   }
 
@@ -112,7 +288,7 @@ function buildIssueEvents(ticket: Ticket): IssueEvent[] {
       kind: "commit",
       sha: delivery.commitSha,
       message: delivery.commitMessage,
-      at: "earlier",
+      atMs: nowMs - 6 * HOUR - 20 * MINUTE,
     });
   }
 
@@ -122,7 +298,7 @@ function buildIssueEvents(ticket: Ticket): IssueEvent[] {
       kind: "pr",
       number: delivery.prNumber,
       status: delivery.prStatus,
-      at: "earlier",
+      atMs: nowMs - 55 * MINUTE,
     });
   }
 
@@ -137,12 +313,46 @@ export function TicketDetail({
   starting,
   decision = "awaiting",
   onDecide,
+  onChangePriority,
+  onChangeAssignee,
+  onAddComment,
+  onDeleteComment,
 }: TicketDetailProps) {
   const canStart = ticket.status === "idle" || ticket.status === "failed";
   const reviewable =
     ticket.status === "succeeded" || ticket.status === "failed";
   const run = ticket.run;
   const documents = ticket.documents;
+  const comments = ticket.delivery.comments;
+  const [commentDraft, setCommentDraft] = useState("");
+  const [replyToId, setReplyToId] = useState<string | null>(null);
+  const commentInputRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    setCommentDraft("");
+    setReplyToId(null);
+  }, [ticket.id]);
+
+  const replyTo = replyToId
+    ? (comments.find((c) => c.id === replyToId) ?? null)
+    : null;
+
+  const rootComments = comments.filter((c) => !c.parentId);
+  const repliesFor = (parentId: string) =>
+    comments.filter((c) => c.parentId === parentId);
+
+  const submitComment = () => {
+    const body = commentDraft.trim();
+    if (!body || !onAddComment) return;
+    onAddComment(body, replyToId ?? undefined);
+    setCommentDraft("");
+    setReplyToId(null);
+  };
+
+  const startReply = (commentId: string) => {
+    setReplyToId(commentId);
+    requestAnimationFrame(() => commentInputRef.current?.focus());
+  };
 
   const diffs = useMemo(
     () => run.evidence.filter((e) => e.kind === "diff"),
@@ -174,17 +384,23 @@ export function TicketDetail({
 
   const [selectedFile, setSelectedFile] = useState<string | null>(defaultFile);
   const [tab, setTab] = useState<CenterTab>("ticket");
-  const [selectedDocId, setSelectedDocId] = useState<string | null>(
-    documents[0]?.id ?? null,
-  );
+  const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
   const [changesOpen, setChangesOpen] = useState(false);
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  // Stable base so relative activity times age from first view of this ticket.
+  const eventBaseMs = useMemo(() => Date.now(), [ticket.id]);
 
   useEffect(() => {
     setSelectedFile(defaultFile);
     setTab("ticket");
-    setSelectedDocId(ticket.documents[0]?.id ?? null);
+    setSelectedDocId(null);
     setChangesOpen(false);
   }, [ticket.id]);
+
+  useEffect(() => {
+    const id = window.setInterval(() => setNowMs(Date.now()), 30_000);
+    return () => window.clearInterval(id);
+  }, []);
 
   useEffect(() => {
     if (!selectedFile && defaultFile) {
@@ -216,9 +432,6 @@ export function TicketDetail({
       (selectedEvidence.kind === "diff" || selectedEvidence.kind === "file")
     );
 
-  const selectedDoc =
-    documents.find((d) => d.id === selectedDocId) ?? documents[0] ?? null;
-
   const openDocumentByPath = (path: string) => {
     const match = documents.find((d) => d.path === path);
     if (match) {
@@ -246,7 +459,10 @@ export function TicketDetail({
     );
   }, [diffs]);
 
-  const issueEvents = useMemo(() => buildIssueEvents(ticket), [ticket]);
+  const issueEvents = useMemo(
+    () => buildIssueEvents(ticket, eventBaseMs),
+    [ticket, eventBaseMs],
+  );
 
   return (
     <div className="ticket-detail">
@@ -293,7 +509,7 @@ export function TicketDetail({
           disabled={!selectedEvidence}
           onClick={() => selectedEvidence && setTab("evidence")}
         >
-          Evidence
+          Diff
         </button>
       </div>
 
@@ -310,80 +526,36 @@ export function TicketDetail({
                 <span className="ticket-breadcrumb-sep" aria-hidden>
                   /
                 </span>
-                <span>Evidence</span>
+                <span>Diff</span>
               </nav>
-              <h1>{selectedEvidence.kind}</h1>
+              <h1>
+                {selectedEvidence.kind === "diff" ||
+                selectedEvidence.kind === "file"
+                  ? selectedEvidence.path
+                  : selectedEvidence.kind === "search"
+                    ? selectedEvidence.query
+                    : selectedEvidence.kind === "tests" ||
+                        selectedEvidence.kind === "terminal"
+                      ? selectedEvidence.title
+                      : "Diff"}
+              </h1>
             </div>
           </div>
-          <EvidencePanel evidence={selectedEvidence} />
+          <EvidencePanel evidence={selectedEvidence} compact />
         </div>
       ) : null}
 
       {tab === "documents" ? (
         <div className="ticket-documents">
-          <div className="ticket-detail-top">
-            <div>
-              <nav className="ticket-breadcrumb" aria-label="Breadcrumb">
-                <span>Tickets</span>
-                <span className="ticket-breadcrumb-sep" aria-hidden>
-                  /
-                </span>
-                <span className="mono">{ticket.key}</span>
-                <span className="ticket-breadcrumb-sep" aria-hidden>
-                  /
-                </span>
-                <span>Documents</span>
-              </nav>
-              <h1>Documents</h1>
-              <p className="ticket-doc-sub">
-                Spec and source files attached to this ticket.
-              </p>
-            </div>
-          </div>
-
           {documents.length === 0 ? (
             <p className="muted-note">No documents attached yet.</p>
           ) : (
-            <div className="docs-layout">
-              <ul className="docs-list" role="listbox" aria-label="Documents">
-                {documents.map((doc) => (
-                  <li key={doc.id}>
-                    <button
-                      type="button"
-                      role="option"
-                      aria-selected={selectedDoc?.id === doc.id}
-                      className={
-                        selectedDoc?.id === doc.id
-                          ? "file-btn active"
-                          : "file-btn"
-                      }
-                      onClick={() => setSelectedDocId(doc.id)}
-                    >
-                      <span className="file-btn-name">{doc.title}</span>
-                      <span className="file-btn-tag">
-                        {docKindLabel(doc.kind)}
-                      </span>
-                    </button>
-                    <div className="docs-list-path mono">{doc.path}</div>
-                  </li>
-                ))}
-              </ul>
-              <div className="docs-preview">
-                {selectedDoc ? (
-                  <>
-                    <div className="changes-preview-header">
-                      <span>{selectedDoc.title}</span>
-                      <span className="mono">{selectedDoc.path}</span>
-                    </div>
-                    <pre className="code-block docs-content">
-                      {selectedDoc.content}
-                    </pre>
-                  </>
-                ) : (
-                  <p className="muted-note">Select a document to read.</p>
-                )}
-              </div>
-            </div>
+            <DocsBrowser
+              ticketKey={ticket.key}
+              documents={documents}
+              selectedId={selectedDocId}
+              onSelect={setSelectedDocId}
+            />
           )}
         </div>
       ) : null}
@@ -501,23 +673,64 @@ export function TicketDetail({
               <div className="ticket-title-row">
                 <h1>{ticket.title}</h1>
                 <StatusChip status={ticket.status} />
+                {decision === "merged" || decision === "approved" ? (
+                  <span className="ticket-state-badge is-resolved">
+                    Resolved
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    className="ticket-state-badge"
+                    disabled={
+                      starting ||
+                      (!canStart &&
+                        !(
+                          reviewable &&
+                          ticket.status === "succeeded" &&
+                          onDecide
+                        ))
+                    }
+                    onClick={() => {
+                      if (canStart) onStart();
+                      else if (reviewable && onDecide) onDecide("approved");
+                    }}
+                  >
+                    Resolve
+                  </button>
+                )}
               </div>
             </div>
           </div>
 
           <div className="ticket-meta">
-            <span>
-              Branch <span className="mono">{ticket.branch}</span>
+            <span className="ticket-meta-badge" title={`Branch ${ticket.branch}`}>
+              <MetaBranchIcon />
+              <span className="mono ticket-meta-badge-label">{ticket.branch}</span>
             </span>
-            <span>
-              Repo <span className="mono">{ticket.repoPath}</span>
+            <span className="ticket-meta-badge" title={`Repo ${ticket.repoPath}`}>
+              <MetaRepoIcon />
+              <span className="mono ticket-meta-badge-label">{ticket.repoPath}</span>
             </span>
-            <span>
-              Priority <strong>{ticket.priority}</strong>
-            </span>
-            <span>
-              Assignee <strong>{ticket.assignee}</strong>
-            </span>
+            <MetaSelect
+              value={ticket.priority}
+              options={PRIORITY_OPTIONS}
+              label={`Priority ${ticket.priority}`}
+              renderIcon={(p) => <PriorityIcon priority={p} />}
+              onChange={(priority) => onChangePriority?.(priority)}
+            />
+            <MetaSelect
+              value={ticket.assignee}
+              options={
+                ASSIGNEE_OPTIONS.includes(
+                  ticket.assignee as (typeof ASSIGNEE_OPTIONS)[number],
+                )
+                  ? ASSIGNEE_OPTIONS
+                  : ([ticket.assignee, ...ASSIGNEE_OPTIONS] as string[])
+              }
+              label={`Assignee ${ticket.assignee}`}
+              renderIcon={() => <MetaAssigneeIcon />}
+              onChange={(assignee) => onChangeAssignee?.(assignee)}
+            />
           </div>
 
           <section className="ticket-section">
@@ -680,6 +893,7 @@ export function TicketDetail({
             {issueEvents.length > 0 ? (
               <ol className="issue-timeline">
                 {issueEvents.map((event) => {
+                  const timeLabel = formatRelativeTime(event.atMs, nowMs);
                   if (event.kind === "commit") {
                     return (
                       <li key={event.id} className="issue-timeline-item">
@@ -692,11 +906,19 @@ export function TicketDetail({
                           </span>
                           <div className="issue-timeline-body">
                             <div className="issue-timeline-title">
-                              New commit{" "}
-                              <span className="mono">{event.sha}</span>
-                            </div>
-                            <div className="issue-timeline-detail">
-                              {event.message}
+                              <span className="issue-timeline-title-text">
+                                New commit{" "}
+                                <span className="mono">{event.sha}</span>
+                              </span>
+                              <span className="issue-timeline-detail">
+                                {event.message}
+                              </span>
+                              <time
+                                className="issue-timeline-time"
+                                dateTime={new Date(event.atMs).toISOString()}
+                              >
+                                {timeLabel}
+                              </time>
                             </div>
                           </div>
                         </div>
@@ -716,16 +938,24 @@ export function TicketDetail({
                           </span>
                           <div className="issue-timeline-body">
                             <div className="issue-timeline-title">
-                              {prStatusLabel(event.status)}{" "}
-                              <span className="mono">#{event.number}</span>
-                              <span
-                                className={`pr-chip pr-${event.status}`}
-                              >
-                                {event.status}
+                              <span className="issue-timeline-title-text">
+                                {prStatusLabel(event.status)}{" "}
+                                <span className="mono">#{event.number}</span>
+                                <span
+                                  className={`pr-chip pr-${event.status}`}
+                                >
+                                  {event.status}
+                                </span>
                               </span>
-                            </div>
-                            <div className="issue-timeline-detail">
-                              {ticket.title}
+                              <span className="issue-timeline-detail">
+                                {ticket.title}
+                              </span>
+                              <time
+                                className="issue-timeline-time"
+                                dateTime={new Date(event.atMs).toISOString()}
+                              >
+                                {timeLabel}
+                              </time>
                             </div>
                           </div>
                         </div>
@@ -744,10 +974,18 @@ export function TicketDetail({
                         </span>
                         <div className="issue-timeline-body">
                           <div className="issue-timeline-title">
-                            New branch
-                          </div>
-                          <div className="issue-timeline-detail mono">
-                            {event.name}
+                            <span className="issue-timeline-title-text">
+                              New branch
+                            </span>
+                            <span className="issue-timeline-detail mono">
+                              {event.name}
+                            </span>
+                            <time
+                              className="issue-timeline-time"
+                              dateTime={new Date(event.atMs).toISOString()}
+                            >
+                              {timeLabel}
+                            </time>
                           </div>
                         </div>
                       </div>
@@ -762,40 +1000,185 @@ export function TicketDetail({
             <div className="issue-comments">
               <div className="section-label">
                 Comments
-                <span className="section-meta">
-                  {ticket.delivery.comments.length}
-                </span>
+                <span className="section-meta">{comments.length}</span>
               </div>
-              {ticket.delivery.comments.length === 0 ? (
+              {rootComments.length === 0 ? (
                 <p className="muted-note">No comments yet.</p>
               ) : (
                 <ul className="issue-comment-list">
-                  {ticket.delivery.comments.map((c) => (
-                    <li key={c.id} className="issue-comment">
-                      <div
-                        className="issue-comment-avatar"
-                        aria-hidden
-                        data-author={c.author}
-                      >
-                        {authorInitials(c.author)}
-                      </div>
-                      <div className="issue-comment-card">
-                        <div className="issue-comment-head">
-                          <div className="issue-comment-meta">
-                            <strong>{c.author}</strong>
-                            <span className="issue-comment-time">
-                              commented {c.createdAt}
-                            </span>
+                  {rootComments.map((c) => {
+                    const thread = repliesFor(c.id);
+                    return (
+                      <li key={c.id} className="issue-comment-thread">
+                        <article
+                          className="issue-comment"
+                          data-author={c.author}
+                        >
+                          <div
+                            className="issue-comment-avatar"
+                            aria-hidden
+                            data-author={c.author}
+                          >
+                            {authorInitials(c.author)}
                           </div>
-                        </div>
-                        <div className="issue-comment-body">
-                          <p>{c.body}</p>
-                        </div>
-                      </div>
-                    </li>
-                  ))}
+                          <div className="issue-comment-card">
+                            <div className="issue-comment-head">
+                              <div className="issue-comment-meta">
+                                <strong>{c.author}</strong>
+                                <span className="issue-comment-time">
+                                  commented {c.createdAt}
+                                </span>
+                              </div>
+                              <div className="issue-comment-actions">
+                                {onAddComment ? (
+                                  <button
+                                    type="button"
+                                    className="issue-comment-action"
+                                    onClick={() => startReply(c.id)}
+                                  >
+                                    Reply
+                                  </button>
+                                ) : null}
+                                {onDeleteComment ? (
+                                  <button
+                                    type="button"
+                                    className="issue-comment-action danger"
+                                    onClick={() => onDeleteComment(c.id)}
+                                  >
+                                    Delete
+                                  </button>
+                                ) : null}
+                              </div>
+                            </div>
+                            <div className="issue-comment-body">
+                              <p>{c.body}</p>
+                            </div>
+                          </div>
+                        </article>
+                        {thread.length > 0 ? (
+                          <ul className="issue-comment-replies">
+                            {thread.map((reply) => (
+                              <li
+                                key={reply.id}
+                                className="issue-comment"
+                                data-author={reply.author}
+                              >
+                                <div
+                                  className="issue-comment-avatar"
+                                  aria-hidden
+                                  data-author={reply.author}
+                                >
+                                  {authorInitials(reply.author)}
+                                </div>
+                                <div className="issue-comment-card">
+                                  <div className="issue-comment-head">
+                                    <div className="issue-comment-meta">
+                                      <strong>{reply.author}</strong>
+                                      <span className="issue-comment-time">
+                                        replied {reply.createdAt}
+                                      </span>
+                                    </div>
+                                    <div className="issue-comment-actions">
+                                      {onAddComment ? (
+                                        <button
+                                          type="button"
+                                          className="issue-comment-action"
+                                          onClick={() => startReply(c.id)}
+                                        >
+                                          Reply
+                                        </button>
+                                      ) : null}
+                                      {onDeleteComment ? (
+                                        <button
+                                          type="button"
+                                          className="issue-comment-action danger"
+                                          onClick={() =>
+                                            onDeleteComment(reply.id)
+                                          }
+                                        >
+                                          Delete
+                                        </button>
+                                      ) : null}
+                                    </div>
+                                  </div>
+                                  <div className="issue-comment-body">
+                                    <p>{reply.body}</p>
+                                  </div>
+                                </div>
+                              </li>
+                            ))}
+                          </ul>
+                        ) : null}
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
+
+              {onAddComment ? (
+                <form
+                  className="issue-comment-composer"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    submitComment();
+                  }}
+                >
+                  <div
+                    className="issue-comment-avatar"
+                    aria-hidden
+                    data-author={COMMENT_AUTHOR}
+                  >
+                    {authorInitials(COMMENT_AUTHOR)}
+                  </div>
+                  <div className="issue-comment-composer-main">
+                    {replyTo ? (
+                      <div className="issue-comment-replying">
+                        <span>
+                          Replying to <strong>{replyTo.author}</strong>
+                        </span>
+                        <button
+                          type="button"
+                          className="issue-comment-action"
+                          onClick={() => setReplyToId(null)}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : null}
+                    <textarea
+                      ref={commentInputRef}
+                      className="issue-comment-input"
+                      rows={3}
+                      placeholder={
+                        replyTo
+                          ? `Reply to ${replyTo.author}…`
+                          : "Leave a comment…"
+                      }
+                      value={commentDraft}
+                      onChange={(e) => setCommentDraft(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (
+                          (e.metaKey || e.ctrlKey) &&
+                          e.key === "Enter" &&
+                          commentDraft.trim()
+                        ) {
+                          e.preventDefault();
+                          submitComment();
+                        }
+                      }}
+                    />
+                    <div className="issue-comment-composer-actions">
+                      <button
+                        type="submit"
+                        className="btn btn-primary"
+                        disabled={!commentDraft.trim()}
+                      >
+                        {replyTo ? "Reply" : "Comment"}
+                      </button>
+                    </div>
+                  </div>
+                </form>
+              ) : null}
             </div>
           </section>
 
@@ -803,7 +1186,7 @@ export function TicketDetail({
             <section className="ticket-section activity-evidence-section">
               <div className="section-label row-between">
                 <span>
-                  Activity evidence{" "}
+                  Activity diff{" "}
                   <span className="section-meta">{selectedEvidence.kind}</span>
                 </span>
                 <button
@@ -811,7 +1194,7 @@ export function TicketDetail({
                   className="btn btn-ghost"
                   onClick={() => setTab("evidence")}
                 >
-                  Focus evidence
+                  Focus diff
                 </button>
               </div>
               <div className="activity-evidence-embed">
@@ -862,18 +1245,6 @@ export function TicketDetail({
             </section>
           )}
 
-          {canStart && (
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={onStart}
-              disabled={starting}
-            >
-              {ticket.status === "failed"
-                ? "Add to chat again"
-                : "Add to chat as context"}
-            </button>
-          )}
         </>
       ) : null}
     </div>

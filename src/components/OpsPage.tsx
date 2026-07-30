@@ -85,7 +85,7 @@ export function OpsPage({ tickets, onOpenTicket, onOpenRun }: OpsPageProps) {
     <div className="ops-page">
       <header className="ops-hero">
         <div className="ops-hero-copy">
-          <div className="section-label">Ops</div>
+          <div className="section-label">Insights</div>
           <h1>Project health</h1>
           <p className="ops-hero-sub">
             Act on blocked and failed runs first. Trends and model spend sit

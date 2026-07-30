@@ -1,12 +1,13 @@
-:root {
+:root,
+[data-typeface="plex"] {
   --bg: #181818;
   --panel: #141414;
   --panel-raised: #1e1e1e;
-  --border: #212121;
+  --border: #222222;
   --border-strong: #2a2a2a;
-  --fg: #e6e6e6;
-  --fg-secondary: #a3a3a3;
-  --muted: #737373;
+  --fg: #e8e4df;
+  --fg-secondary: #a89f94;
+  --muted: #7a7268;
   --hover: #222222;
   --active: #2a2a2a;
 
@@ -19,12 +20,101 @@
   --success: #7aab87;
   --success-bg: #1a2620;
 
+  /* Diff colors — independent from status chips */
+  --diff-add: #7aab87;
+  --diff-del: #d17a73;
+  --diff-add-bg: color-mix(in srgb, var(--diff-add) 10%, transparent);
+  --diff-del-bg: color-mix(in srgb, var(--diff-del) 10%, transparent);
+  --diff-hunk: #6b9fd4;
+  --diff-hunk-bg: color-mix(in srgb, var(--diff-hunk) 6%, transparent);
+
   --font-sans: "IBM Plex Sans", "Helvetica Neue", sans-serif;
   --font-mono: "IBM Plex Mono", "Menlo", monospace;
 
-  --radius: 4px;
-  --chat-width: 380px;
-  --queue-width: 240px;
-  --rail-width: 46px;
-  --topbar-height: 32px;
+  --radius: 8px;
+  --chat-width: 400px;
+  --queue-width: 260px;
+  --rail-width: 0px;
+}
+
+[data-diff-palette="current"] {
+  --diff-add: #7aab87;
+  --diff-del: #d17a73;
+  --diff-add-bg: color-mix(in srgb, var(--diff-add) 10%, transparent);
+  --diff-del-bg: color-mix(in srgb, var(--diff-del) 10%, transparent);
+}
+
+[data-diff-palette="github"] {
+  --diff-add: #3fb950;
+  --diff-del: #f85149;
+  --diff-add-bg: rgba(46, 160, 67, 0.15);
+  --diff-del-bg: rgba(248, 81, 73, 0.15);
+  --diff-hunk: #79b8ff;
+  --diff-hunk-bg: rgba(88, 166, 255, 0.08);
+}
+
+[data-diff-palette="mint-coral"] {
+  --diff-add: #6ec9a8;
+  --diff-del: #e08a7a;
+  --diff-add-bg: rgba(110, 201, 168, 0.12);
+  --diff-del-bg: rgba(224, 138, 122, 0.12);
+  --diff-hunk: #7aa2d4;
+  --diff-hunk-bg: rgba(122, 162, 212, 0.08);
+}
+
+[data-diff-palette="teal-rose"] {
+  --diff-add: #5eb8a8;
+  --diff-del: #e07a8c;
+  --diff-add-bg: rgba(94, 184, 168, 0.12);
+  --diff-del-bg: rgba(224, 122, 140, 0.12);
+  --diff-hunk: #8a9bb8;
+  --diff-hunk-bg: rgba(138, 155, 184, 0.08);
+}
+
+[data-diff-palette="cyan-amber"] {
+  --diff-add: #5bb8d4;
+  --diff-del: #d4a15c;
+  --diff-add-bg: rgba(91, 184, 212, 0.12);
+  --diff-del-bg: rgba(212, 161, 92, 0.12);
+  --diff-hunk: #9aa0b4;
+  --diff-hunk-bg: rgba(154, 160, 180, 0.08);
+}
+
+[data-diff-palette="quiet"] {
+  --diff-add: #a8d4b4;
+  --diff-del: #d9a8a8;
+  --diff-add-bg: rgba(122, 171, 135, 0.12);
+  --diff-del-bg: rgba(201, 122, 115, 0.12);
+  --diff-hunk: #93a4bb;
+  --diff-hunk-bg: rgba(107, 159, 212, 0.07);
+}
+
+/* Inter UI + JetBrains Mono — pro tool default */
+[data-typeface="inter"] {
+  --font-sans: "Inter", "Helvetica Neue", sans-serif;
+  --font-mono: "JetBrains Mono", "Menlo", monospace;
+}
+
+/* Source Sans 3 + Source Code Pro — warm technical */
+[data-typeface="source"] {
+  --font-sans: "Source Sans 3", "Helvetica Neue", sans-serif;
+  --font-mono: "Source Code Pro", "Menlo", monospace;
+}
+
+/* Space Grotesk + IBM Plex Mono — geometric personality */
+[data-typeface="space"] {
+  --font-sans: "Space Grotesk", "Helvetica Neue", sans-serif;
+  --font-mono: "IBM Plex Mono", "Menlo", monospace;
+}
+
+/* IBM Plex Sans + JetBrains Mono — calm UI, strong code */
+[data-typeface="contrast"] {
+  --font-sans: "IBM Plex Sans", "Helvetica Neue", sans-serif;
+  --font-mono: "JetBrains Mono", "Menlo", monospace;
+}
+
+/* Manrope + IBM Plex Mono — soft geometric */
+[data-typeface="manrope"] {
+  --font-sans: "Manrope", "Helvetica Neue", sans-serif;
+  --font-mono: "IBM Plex Mono", "Menlo", monospace;
 }

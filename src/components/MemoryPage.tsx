@@ -1,9 +1,10 @@
 import { memoryItems } from "../data/mock";
-import type { MemoryItem } from "../types";
+import type { MemoryItem, PlaceId } from "../types";
 
 interface MemoryPageProps {
   selectedId: string;
   onSelect: (id: string) => void;
+  onNavigateSettings: (place: Extract<PlaceId, "memory" | "environments">) => void;
 }
 
 const kindLabel: Record<MemoryItem["kind"], string> = {
@@ -12,7 +13,11 @@ const kindLabel: Record<MemoryItem["kind"], string> = {
   qa: "Q&A",
 };
 
-export function MemoryPage({ selectedId, onSelect }: MemoryPageProps) {
+export function MemoryPage({
+  selectedId,
+  onSelect,
+  onNavigateSettings,
+}: MemoryPageProps) {
   const selected =
     memoryItems.find((m) => m.id === selectedId) ?? memoryItems[0];
 
@@ -20,8 +25,20 @@ export function MemoryPage({ selectedId, onSelect }: MemoryPageProps) {
     <>
       <aside className="queue">
         <div className="queue-header">
-          <span>Memory</span>
-          <span>{memoryItems.length}</span>
+          <span>Settings</span>
+        </div>
+        <div className="queue-lined-tabs" role="tablist">
+          <button type="button" className="active" role="tab" aria-selected>
+            Memory
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={false}
+            onClick={() => onNavigateSettings("environments")}
+          >
+            Environments
+          </button>
         </div>
         <div className="queue-list">
           {memoryItems.map((m) => (
@@ -44,6 +61,13 @@ export function MemoryPage({ selectedId, onSelect }: MemoryPageProps) {
       </aside>
       <main className="center">
         <div className="center-body place-detail">
+          <nav className="ticket-breadcrumb" aria-label="Breadcrumb">
+            <span>Settings</span>
+            <span className="ticket-breadcrumb-sep" aria-hidden>
+              /
+            </span>
+            <span>Memory</span>
+          </nav>
           <div className="section-label">{kindLabel[selected.kind]}</div>
           <h1>{selected.title}</h1>
           <p className="ticket-desc">{selected.body}</p>

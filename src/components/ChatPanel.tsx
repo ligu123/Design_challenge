@@ -1,7 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
-import type { AgentConfig, ModelEffort, Ticket } from "../types";
+import type {
+  AgentConfig,
+  Evidence,
+  ModelEffort,
+  Ticket,
+  TimelineItem,
+} from "../types";
 import { ActivityItem } from "./ActivityItem";
-import { EvidencePanel } from "./evidence/EvidencePanel";
+import { ResultItem } from "./ResultItem";
 import { PerformanceSummary } from "./PerformanceSummary";
 
 const MODELS = [
@@ -27,23 +33,58 @@ interface ChatSession {
 interface ChatPanelProps {
   tickets: Ticket[];
   ticket: Ticket | null;
-  selectedActivityId: string | null;
   selectedEvidenceId?: string | null;
   config: AgentConfig;
   onConfigChange: (config: AgentConfig) => void;
-  onSelectActivity: (activityId: string, evidenceId?: string) => void;
+  onSelectEvidence: (evidenceId: string | null) => void;
   onSelectTicket?: (ticketId: string) => void;
   onAnswerBlocked: (answer: string) => void;
-  onStart?: () => void;
-  starting?: boolean;
 }
 
 function chatTitleForTicket(ticket: Ticket) {
-  return ticket.key;
+  return ticket.title;
 }
 
 function makeSession(partial: Omit<ChatSession, "updatedAt">): ChatSession {
   return { ...partial, updatedAt: Date.now() };
+}
+
+type TimelineGroup =
+  | { type: "message"; item: Extract<TimelineItem, { type: "message" }> }
+  | {
+      type: "step";
+      activity: Extract<TimelineItem, { type: "activity" }>;
+      results: Extract<TimelineItem, { type: "result" }>[];
+    }
+  | {
+      type: "orphan-result";
+      item: Extract<TimelineItem, { type: "result" }>;
+    };
+
+function groupTimeline(timeline: TimelineItem[]): TimelineGroup[] {
+  const groups: TimelineGroup[] = [];
+  for (const item of timeline) {
+    if (item.type === "message") {
+      groups.push({ type: "message", item });
+      continue;
+    }
+    if (item.type === "activity") {
+      groups.push({ type: "step", activity: item, results: [] });
+      continue;
+    }
+    const last = groups[groups.length - 1];
+    if (last?.type === "step") {
+      last.results.push(item);
+    } else {
+      groups.push({ type: "orphan-result", item });
+    }
+  }
+  return groups;
+}
+
+/** Search/read detail already lives on the activity row — no result card. */
+function showsResultCard(evidence: Evidence) {
+  return evidence.kind !== "search" && evidence.kind !== "file";
 }
 
 function seedSessions(tickets: Ticket[], selectedId: string | null) {
@@ -102,15 +143,12 @@ function formatDuration(ms: number) {
 export function ChatPanel({
   tickets,
   ticket,
-  selectedActivityId,
   selectedEvidenceId = null,
   config,
   onConfigChange,
-  onSelectActivity,
+  onSelectEvidence,
   onSelectTicket,
   onAnswerBlocked,
-  onStart,
-  starting,
 }: ChatPanelProps) {
   const streamRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -133,7 +171,6 @@ export function ChatPanel({
     "pr" | "commit" | "usage" | null
   >(null);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
-  const [evidenceOpen, setEvidenceOpen] = useState(false);
   const modelMenuRef = useRef<HTMLDivElement>(null);
 
   const activeSession =
@@ -152,26 +189,6 @@ export function ChatPanel({
     viewTicket?.status === "blocked"
       ? viewTicket.run.blockedQuestion
       : undefined;
-
-  const evidenceIdFromActivity = (() => {
-    const activity = timeline.find(
-      (i) => i.type === "activity" && i.id === selectedActivityId,
-    );
-    if (activity && activity.type === "activity") return activity.evidenceId;
-    return undefined;
-  })();
-
-  const selectedEvidence =
-    viewTicket && (evidenceIdFromActivity || selectedEvidenceId)
-      ? viewTicket.run.evidence.find(
-          (e) => e.id === (evidenceIdFromActivity || selectedEvidenceId),
-        ) ?? null
-      : null;
-
-  const canStart =
-    viewTicket &&
-    (viewTicket.status === "idle" || viewTicket.status === "failed") &&
-    onStart;
 
   const runStats = useMemo(() => {
     if (!viewTicket || viewTicket.status === "idle") return null;
@@ -213,7 +230,6 @@ export function ChatPanel({
     setHistoryOpen(false);
     setComposerPanel(null);
     setModelMenuOpen(false);
-    setEvidenceOpen(false);
     setDraft("");
     setAttachments([]);
     if (session.ticketId && onSelectTicket) onSelectTicket(session.ticketId);
@@ -231,7 +247,6 @@ export function ChatPanel({
     setHistoryOpen(false);
     setDraft("");
     setAttachments([]);
-    setEvidenceOpen(false);
   };
 
   const closeChat = (sessionId: string, e?: MouseEvent) => {
@@ -287,7 +302,7 @@ export function ChatPanel({
     timeline.length,
     viewTicket?.id,
     viewTicket?.status,
-    selectedEvidence?.id,
+    selectedEvidenceId,
     activeChatId,
   ]);
 
@@ -297,12 +312,7 @@ export function ChatPanel({
     setAttachments([]);
     setComposerPanel(null);
     setModelMenuOpen(false);
-    setEvidenceOpen(false);
   }, [activeChatId]);
-
-  useEffect(() => {
-    setEvidenceOpen(false);
-  }, [selectedEvidence?.id]);
 
   useEffect(() => {
     if (!modelMenuOpen && !historyOpen) return;
@@ -341,20 +351,6 @@ export function ChatPanel({
     return `PR #${delivery.prNumber}`;
   })();
 
-  const evidenceSummary = (() => {
-    if (!selectedEvidence) return null;
-    switch (selectedEvidence.kind) {
-      case "diff":
-      case "file":
-        return selectedEvidence.path;
-      case "tests":
-      case "terminal":
-        return selectedEvidence.title;
-      case "search":
-        return selectedEvidence.query;
-    }
-  })();
-
   const addFiles = (files: FileList | null) => {
     if (!files?.length) return;
     const next = Array.from(files).map((f) => ({
@@ -372,7 +368,14 @@ export function ChatPanel({
     <aside className="chat-panel">
       <div className="chat-tabs-bar">
         <div className="chat-tabs" role="tablist" aria-label="Chats">
-          {openSessions.map((session) => (
+          {openSessions.map((session) => {
+            const linked = session.ticketId
+              ? tickets.find((t) => t.id === session.ticketId)
+              : null;
+            const tabTitle = linked
+              ? `${linked.key} · ${session.title}`
+              : session.title;
+            return (
             <div
               key={session.id}
               className={`chat-tab${session.id === activeChatId ? " active" : ""}`}
@@ -382,7 +385,7 @@ export function ChatPanel({
                 role="tab"
                 className="chat-tab-main"
                 aria-selected={session.id === activeChatId}
-                title={session.title}
+                title={tabTitle}
                 onClick={() => focusChat(session.id)}
               >
                 {session.title}
@@ -396,7 +399,8 @@ export function ChatPanel({
                 ×
               </button>
             </div>
-          ))}
+            );
+          })}
         </div>
 
         <button
@@ -427,10 +431,24 @@ export function ChatPanel({
           >
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
               <path
-                d="M4 6h16M4 12h10M4 18h14"
+                d="M3.5 12a8.5 8.5 0 1 0 2.4-5.9"
                 stroke="currentColor"
                 strokeWidth="1.75"
                 strokeLinecap="round"
+              />
+              <path
+                d="M3.5 5.5v4.2h4.2"
+                stroke="currentColor"
+                strokeWidth="1.75"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+              <path
+                d="M12 8.5V12l2.6 1.6"
+                stroke="currentColor"
+                strokeWidth="1.75"
+                strokeLinecap="round"
+                strokeLinejoin="round"
               />
             </svg>
           </button>
@@ -462,7 +480,7 @@ export function ChatPanel({
                           </span>
                           <span className="chat-history-sub">
                             {linked
-                              ? linked.title
+                              ? linked.key
                               : session.ticketId
                                 ? "Ticket chat"
                                 : "Empty chat"}
@@ -486,76 +504,56 @@ export function ChatPanel({
         )}
         {viewTicket && timeline.length === 0 && (
           <div className="chat-empty">
-            Ready to begin. Add this ticket to the chat as context.
-            {canStart && (
-              <div className="chat-empty-action">
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  onClick={onStart}
-                  disabled={starting}
-                >
-                  {viewTicket.status === "failed"
-                    ? "Add to chat again"
-                    : "Add to chat as context"}
-                </button>
-              </div>
-            )}
+            {viewTicket.status === "idle"
+              ? "No agent activity yet. Resolve the ticket to begin."
+              : "No agent activity yet."}
           </div>
         )}
-        {timeline.map((item) => {
-          if (item.type === "message") {
+        {groupTimeline(timeline).map((group) => {
+          if (group.type === "message") {
+            const item = group.item;
             return (
               <div key={item.id} className={`message message-${item.role}`}>
-                {item.role === "user" && (
-                  <div className="message-role">{item.role}</div>
-                )}
                 <div className="message-body">{item.content}</div>
               </div>
             );
           }
+
+          if (group.type === "orphan-result") {
+            const evidence = viewTicket?.run.evidence.find(
+              (e) => e.id === group.item.evidenceId,
+            );
+            if (!evidence || !showsResultCard(evidence)) return null;
+            return (
+              <ResultItem
+                key={group.item.id}
+                evidence={evidence}
+                selected={selectedEvidenceId === evidence.id}
+                onSelect={() => onSelectEvidence(evidence.id)}
+              />
+            );
+          }
+
           return (
-            <ActivityItem
-              key={item.id}
-              item={item}
-              selected={selectedActivityId === item.id}
-              onSelect={() => onSelectActivity(item.id, item.evidenceId)}
-            />
+            <div key={group.activity.id} className="activity-step">
+              <ActivityItem item={group.activity} />
+              {group.results.map((result) => {
+                const evidence = viewTicket?.run.evidence.find(
+                  (e) => e.id === result.evidenceId,
+                );
+                if (!evidence || !showsResultCard(evidence)) return null;
+                return (
+                  <ResultItem
+                    key={result.id}
+                    evidence={evidence}
+                    selected={selectedEvidenceId === evidence.id}
+                    onSelect={() => onSelectEvidence(evidence.id)}
+                  />
+                );
+              })}
+            </div>
           );
         })}
-
-        {selectedEvidence && (
-          <div
-            className={`chat-evidence${evidenceOpen ? " open" : ""}`}
-          >
-            <button
-              type="button"
-              className="chat-evidence-trigger"
-              aria-expanded={evidenceOpen}
-              onClick={() => setEvidenceOpen((open) => !open)}
-            >
-              <span className="chat-evidence-label">
-                <span className="section-label">
-                  Evidence
-                  <span className="section-meta">{selectedEvidence.kind}</span>
-                </span>
-                {evidenceSummary && (
-                  <span className="chat-evidence-path mono">
-                    {evidenceSummary}
-                  </span>
-                )}
-              </span>
-              <span className="chat-evidence-chevron" aria-hidden>
-                {evidenceOpen ? "▾" : "▸"}
-              </span>
-            </button>
-            {evidenceOpen && (
-              <div className="chat-evidence-body">
-                <EvidencePanel evidence={selectedEvidence} />
-              </div>
-            )}
-          </div>
-        )}
       </div>
 
       {viewTicket?.status === "succeeded" && viewTicket.run.performance && (

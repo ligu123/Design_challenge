@@ -1,9 +1,10 @@
 import { environmentTargets } from "../data/mock";
-import type { EnvironmentTarget } from "../types";
+import type { EnvironmentTarget, PlaceId } from "../types";
 
 interface EnvironmentsPageProps {
   selectedId: string;
   onSelect: (id: string) => void;
+  onNavigateSettings: (place: Extract<PlaceId, "memory" | "environments">) => void;
 }
 
 const kindLabel: Record<EnvironmentTarget["kind"], string> = {
@@ -15,6 +16,7 @@ const kindLabel: Record<EnvironmentTarget["kind"], string> = {
 export function EnvironmentsPage({
   selectedId,
   onSelect,
+  onNavigateSettings,
 }: EnvironmentsPageProps) {
   const selected =
     environmentTargets.find((e) => e.id === selectedId) ??
@@ -24,8 +26,20 @@ export function EnvironmentsPage({
     <>
       <aside className="queue">
         <div className="queue-header">
-          <span>Environments</span>
-          <span>{environmentTargets.length}</span>
+          <span>Settings</span>
+        </div>
+        <div className="queue-lined-tabs" role="tablist">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={false}
+            onClick={() => onNavigateSettings("memory")}
+          >
+            Memory
+          </button>
+          <button type="button" className="active" role="tab" aria-selected>
+            Environments
+          </button>
         </div>
         <div className="queue-list">
           {environmentTargets.map((e) => (
@@ -49,6 +63,13 @@ export function EnvironmentsPage({
       </aside>
       <main className="center">
         <div className="center-body place-detail">
+          <nav className="ticket-breadcrumb" aria-label="Breadcrumb">
+            <span>Settings</span>
+            <span className="ticket-breadcrumb-sep" aria-hidden>
+              /
+            </span>
+            <span>Environments</span>
+          </nav>
           <div className="section-label">{kindLabel[selected.kind]} target</div>
           <h1>{selected.name}</h1>
           <p className="ticket-desc">{selected.note}</p>

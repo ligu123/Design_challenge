@@ -7,9 +7,6 @@ import {
   initialTickets,
   memoryItems,
   policyPlaybooks,
-  workspaceHotFiles,
-  workspaceRepoMap,
-  workspaceBranches,
 } from "../data/mock";
 import type {
   AgentConfig,
@@ -18,7 +15,7 @@ import type {
   ReviewDecision,
   Ticket,
 } from "../types";
-import { ActivityRail } from "./ActivityRail";
+import { TopNav } from "./TopNav";
 import { ChatPanel } from "./ChatPanel";
 import { ColumnResizeHandle, useColumnWidths } from "./ColumnResize";
 import { EnvironmentsPage } from "./EnvironmentsPage";
@@ -27,54 +24,41 @@ import { OpsPage } from "./OpsPage";
 import { PoliciesPage } from "./PoliciesPage";
 import { TicketDetail } from "./TicketDetail";
 import { TicketQueue } from "./TicketQueue";
-import { WorkspacePage } from "./WorkspacePage";
+import { TypefaceSwitcher } from "./TypefaceSwitcher";
+import { DiffColorSwitcher } from "./DiffColorSwitcher";
 
 function cloneTickets(tickets: Ticket[]): Ticket[] {
   return structuredClone(tickets);
 }
 
-function preferDiffEvidence(ticket: Ticket): {
-  activityId: string | null;
-  evidenceId: string | null;
-} {
-  const lastEdit = [...ticket.run.timeline].reverse().find(
-    (i) => i.type === "activity" && i.kind === "edit" && i.evidenceId,
-  );
-  if (lastEdit && lastEdit.type === "activity") {
-    return {
-      activityId: lastEdit.id,
-      evidenceId: lastEdit.evidenceId ?? null,
-    };
+function preferDiffEvidence(ticket: Ticket): string | null {
+  const lastDiffResult = [...ticket.run.timeline].reverse().find((i) => {
+    if (i.type !== "result") return false;
+    const evidence = ticket.run.evidence.find((e) => e.id === i.evidenceId);
+    return evidence?.kind === "diff";
+  });
+  if (lastDiffResult && lastDiffResult.type === "result") {
+    return lastDiffResult.evidenceId;
+  }
+
+  const lastResult = [...ticket.run.timeline]
+    .reverse()
+    .find((i) => i.type === "result");
+  if (lastResult && lastResult.type === "result") {
+    return lastResult.evidenceId;
   }
 
   const diffs = ticket.run.evidence.filter((e) => e.kind === "diff");
-  const lastDiff = diffs[diffs.length - 1];
-  if (lastDiff) {
-    return { activityId: null, evidenceId: lastDiff.id };
-  }
-
-  const lastWithEvidence = [...ticket.run.timeline]
-    .reverse()
-    .find((i) => i.type === "activity" && i.evidenceId);
-  if (lastWithEvidence && lastWithEvidence.type === "activity") {
-    return {
-      activityId: lastWithEvidence.id,
-      evidenceId: lastWithEvidence.evidenceId ?? null,
-    };
-  }
-  return { activityId: null, evidenceId: null };
+  return diffs[diffs.length - 1]?.id ?? null;
 }
 
 
 export function AppShell() {
-  const initial = preferDiffEvidence(initialTickets[0]);
+  const initialEvidence = preferDiffEvidence(initialTickets[0]);
   const [tickets, setTickets] = useState(() => cloneTickets(initialTickets));
   const [selectedId, setSelectedId] = useState<string>(initialTickets[0].id);
-  const [selectedActivityId, setSelectedActivityId] = useState<string | null>(
-    initial.activityId ?? "a3",
-  );
   const [selectedEvidenceId, setSelectedEvidenceId] = useState<string | null>(
-    initial.evidenceId ?? "ev-diff-1",
+    initialEvidence ?? "ev-diff-1",
   );
   const [place, setPlace] = useState<PlaceId>("tickets");
   const [config, setConfig] = useState<AgentConfig>(defaultConfig);
@@ -88,12 +72,6 @@ export function AppShell() {
   });
   const [memoryId, setMemoryId] = useState(memoryItems[0].id);
   const [envId, setEnvId] = useState(environmentTargets[0].id);
-  const [workspaceTab, setWorkspaceTab] = useState<"map" | "hot" | "branches">(
-    "hot",
-  );
-  const [workspacePath, setWorkspacePath] = useState<string | null>(
-    workspaceHotFiles[0]?.path ?? null,
-  );
   const [starting, setStarting] = useState(false);
 
   const ticket = useMemo(
@@ -109,7 +87,6 @@ export function AppShell() {
     setSelectedId(id);
     const next = tickets.find((t) => t.id === id);
     if (!next) {
-      setSelectedActivityId(null);
       setSelectedEvidenceId(null);
       return;
     }
@@ -119,26 +96,14 @@ export function AppShell() {
       next.status === "succeeded" ||
       next.status === "blocked"
     ) {
-      const preferred = preferDiffEvidence(next);
-      setSelectedActivityId(preferred.activityId);
-      setSelectedEvidenceId(preferred.evidenceId);
+      setSelectedEvidenceId(preferDiffEvidence(next));
     } else {
-      setSelectedActivityId(null);
       setSelectedEvidenceId(null);
     }
   };
 
   const navigate = (next: PlaceId) => {
     setPlace(next);
-    if (next === "workspace") {
-      if (workspaceTab === "map") {
-        setWorkspacePath(workspaceRepoMap[0]?.path ?? null);
-      } else if (workspaceTab === "hot") {
-        setWorkspacePath(workspaceHotFiles[0]?.path ?? null);
-      } else {
-        setWorkspacePath(workspaceBranches[0]?.name ?? null);
-      }
-    }
   };
 
   const openTicketPlace = (id: string) => {
@@ -162,7 +127,6 @@ export function AppShell() {
     }
 
     setStarting(true);
-    setSelectedActivityId(null);
     setSelectedEvidenceId(null);
 
     const full = structuredClone(script);
@@ -197,12 +161,12 @@ export function AppShell() {
             stages: full.stages,
           },
         }));
-        const preferred = preferDiffEvidence({
-          ...ticket,
-          run: { ...full, timeline: revealed },
-        });
-        setSelectedActivityId(preferred.activityId);
-        setSelectedEvidenceId(preferred.evidenceId);
+        setSelectedEvidenceId(
+          preferDiffEvidence({
+            ...ticket,
+            run: { ...full, timeline: revealed },
+          }),
+        );
         setStarting(false);
         return;
       }
@@ -222,8 +186,7 @@ export function AppShell() {
         },
       }));
 
-      if (current.type === "activity" && current.evidenceId) {
-        setSelectedActivityId(current.id);
+      if (current.type === "result") {
         setSelectedEvidenceId(current.evidenceId);
       }
 
@@ -288,15 +251,7 @@ export function AppShell() {
         timeline: [...baseTimeline, ...extra],
       },
     });
-    setSelectedActivityId(preferred.activityId);
-    setSelectedEvidenceId(preferred.evidenceId);
-  };
-
-  const onSelectActivity = (activityId: string, evidenceId?: string) => {
-    setSelectedActivityId(activityId);
-    if (evidenceId) {
-      setSelectedEvidenceId(evidenceId);
-    }
+    setSelectedEvidenceId(preferred);
   };
 
   const applyPolicy = (policy: PolicyPlaybook) => {
@@ -316,7 +271,7 @@ export function AppShell() {
         } as CSSProperties
       }
     >
-      <ActivityRail place={place} onNavigate={navigate} />
+      <TopNav place={place} onNavigate={navigate} tickets={tickets} />
 
       {hasQueue && (
         <ColumnResizeHandle side="queue" onPointerDown={startQueueResize} />
@@ -346,6 +301,41 @@ export function AppShell() {
                     setReviewDecisions((prev) => ({
                       ...prev,
                       [ticket.id]: d,
+                    }))
+                  }
+                  onChangePriority={(priority) =>
+                    updateTicket(ticket.id, (t) => ({ ...t, priority }))
+                  }
+                  onChangeAssignee={(assignee) =>
+                    updateTicket(ticket.id, (t) => ({ ...t, assignee }))
+                  }
+                  onAddComment={(body, parentId) =>
+                    updateTicket(ticket.id, (t) => ({
+                      ...t,
+                      delivery: {
+                        ...t.delivery,
+                        comments: [
+                          ...t.delivery.comments,
+                          {
+                            id: `c-${Date.now()}`,
+                            author: "maya",
+                            body,
+                            createdAt: "just now",
+                            ...(parentId ? { parentId } : {}),
+                          },
+                        ],
+                      },
+                    }))
+                  }
+                  onDeleteComment={(commentId) =>
+                    updateTicket(ticket.id, (t) => ({
+                      ...t,
+                      delivery: {
+                        ...t.delivery,
+                        comments: t.delivery.comments.filter(
+                          (c) => c.id !== commentId && c.parentId !== commentId,
+                        ),
+                      },
                     }))
                   }
                 />
@@ -382,44 +372,39 @@ export function AppShell() {
         />
       )}
 
-      {place === "workspace" && (
-        <WorkspacePage
-          tab={workspaceTab}
-          onTab={(tab) => {
-            setWorkspaceTab(tab);
-            if (tab === "map") setWorkspacePath(workspaceRepoMap[0]?.path ?? null);
-            else if (tab === "hot")
-              setWorkspacePath(workspaceHotFiles[0]?.path ?? null);
-            else setWorkspacePath(workspaceBranches[0]?.name ?? null);
-          }}
-          selectedPath={workspacePath}
-          onSelectPath={setWorkspacePath}
+      {place === "memory" && (
+        <MemoryPage
+          selectedId={memoryId}
+          onSelect={setMemoryId}
+          onNavigateSettings={navigate}
         />
       )}
 
-      {place === "memory" && (
-        <MemoryPage selectedId={memoryId} onSelect={setMemoryId} />
-      )}
-
       {place === "environments" && (
-        <EnvironmentsPage selectedId={envId} onSelect={setEnvId} />
+        <EnvironmentsPage
+          selectedId={envId}
+          onSelect={setEnvId}
+          onNavigateSettings={navigate}
+        />
       )}
 
       {showChat && (
         <ChatPanel
           tickets={tickets}
           ticket={ticket}
-          selectedActivityId={selectedActivityId}
           selectedEvidenceId={selectedEvidenceId}
           config={config}
           onConfigChange={setConfig}
-          onSelectActivity={onSelectActivity}
+          onSelectEvidence={setSelectedEvidenceId}
           onSelectTicket={selectTicket}
           onAnswerBlocked={answerBlocked}
-          onStart={startAgent}
-          starting={starting}
         />
       )}
+
+      <div className="dev-controllers">
+        <TypefaceSwitcher />
+        <DiffColorSwitcher />
+      </div>
     </div>
   );
 }

@@ -1,7 +1,17 @@
 import type { DiffEvidence } from "../../types";
 import { DiffCodeBlock } from "../DiffCodeBlock";
 
-export function DiffView({ evidence }: { evidence: DiffEvidence }) {
+export function DiffView({
+  evidence,
+  compact = false,
+}: {
+  evidence: DiffEvidence;
+  compact?: boolean;
+}) {
+  if (compact) {
+    return <DiffCodeBlock content={evidence.content} bare />;
+  }
+
   return (
     <div className="evidence-panel">
       <div className="evidence-header">

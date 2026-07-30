@@ -12,7 +12,7 @@ const QUEUE_MAX = 360;
 const CHAT_MIN = 280;
 const CHAT_MAX = 520;
 const CENTER_MIN = 360;
-const RAIL = 46;
+const RAIL = 0;
 
 const STORAGE_KEY = "design-challenge-column-widths";
 
