@@ -8,6 +8,7 @@ import type {
   OpsPattern,
   OpsPolicyStat,
   OpsTrendPoint,
+  PendingDecision,
   PolicyPlaybook,
   Ticket,
   TicketDelivery,
@@ -15,6 +16,26 @@ import type {
   WorkspaceBranch,
   WorkspaceFile,
 } from "../types";
+
+function waitingSinceMinutesAgo(minutes: number) {
+  return Date.now() - minutes * 60_000;
+}
+
+function pendingDecision(partial: PendingDecision): PendingDecision {
+  return partial;
+}
+
+function criteriaEvidence(
+  id: string,
+  items: { text: string; met: boolean; note?: string }[],
+) {
+  return {
+    id,
+    kind: "criteria" as const,
+    title: "Acceptance criteria",
+    results: items,
+  };
+}
 
 function specDoc(ticketKey: string, body: string): TicketDocument {
   return {
@@ -448,6 +469,49 @@ const runningRun: AgentRun = {
   id: "run-auth-refresh",
   status: "blocked",
   blockedQuestion: "Open a draft PR, or wait for your review first?",
+  pendingDecision: pendingDecision({
+    id: "pd-214-pr",
+    kind: "choice",
+    title: "Open pull request?",
+    prompt:
+      "Single-flight lock is in place and unit tests pass. How should I deliver the changes?",
+    blockingStage: "verify",
+    waitingSince: waitingSinceMinutesAgo(12),
+    askActivityId: "a-ask",
+    options: [
+      {
+        id: "open-pr",
+        label: "Open draft PR",
+        description: "Create draft PR #482 for team review",
+      },
+      {
+        id: "wait",
+        label: "Wait for my review",
+        description: "Keep the commit local until I approve",
+      },
+      {
+        id: "custom",
+        label: "Custom reply…",
+        isCustom: true,
+      },
+    ],
+    contextRefs: [
+      {
+        id: "ctx-214-diff",
+        kind: "evidence",
+        label: "refresh.ts",
+        sublabel: "src/auth/refresh.ts",
+        refId: "ev-diff-1",
+      },
+      {
+        id: "ctx-214-tests",
+        kind: "evidence",
+        label: "3 tests passed",
+        sublabel: "src/auth/refresh.test.ts",
+        refId: "ev-tests-1",
+      },
+    ],
+  }),
   filesChanged: ["src/auth/session.ts", "src/auth/refresh.ts"],
   stages: [
     { id: "investigate", label: "Investigate", status: "done" },
@@ -722,6 +786,54 @@ const blockedRun: AgentRun = {
   status: "blocked",
   blockedQuestion:
     "Should rate-limit headers be applied only to /api/public/*, or to all authenticated routes as well?",
+  pendingDecision: pendingDecision({
+    id: "pd-198-scope",
+    kind: "choice",
+    title: "Rate-limit scope",
+    prompt:
+      "Should rate-limit headers be applied only to /api/public/*, or to all authenticated routes as well?",
+    blockingStage: "implement",
+    waitingSince: waitingSinceMinutesAgo(63),
+    askActivityId: "b-a3",
+    options: [
+      {
+        id: "public-only",
+        label: "Public routes only",
+        description: "Wire rateLimit into publicRouter only",
+      },
+      {
+        id: "auth-routes",
+        label: "All authenticated routes",
+        description: "Apply globally after auth middleware",
+      },
+      {
+        id: "both-limits",
+        label: "Both, different limits",
+        description: "60/min public · 600/min authenticated",
+      },
+      {
+        id: "custom",
+        label: "Custom reply…",
+        isCustom: true,
+      },
+    ],
+    contextRefs: [
+      {
+        id: "ctx-198-diff",
+        kind: "evidence",
+        label: "rateLimit.ts",
+        sublabel: "src/middleware/rateLimit.ts",
+        refId: "ev-b-diff",
+      },
+      {
+        id: "ctx-198-spec",
+        kind: "doc",
+        label: "Spec",
+        sublabel: "tickets/ENG-198.md",
+        refId: "ENG-198-spec",
+      },
+    ],
+  }),
   filesChanged: ["src/middleware/rateLimit.ts"],
   stages: [
     { id: "investigate", label: "Investigate", status: "done" },
@@ -873,6 +985,19 @@ const blockedResolvedRun: AgentRun = {
       evidenceId: "ev-br-tests",
     },
     {
+      id: "br-a4",
+      type: "activity",
+      kind: "verify",
+      title: "Checking acceptance criteria",
+      detail: "3 items",
+      status: "done",
+    },
+    {
+      id: "br-a4-result",
+      type: "result",
+      evidenceId: "ev-br-criteria",
+    },
+    {
       id: "br-m3",
       type: "message",
       role: "assistant",
@@ -902,6 +1027,23 @@ const blockedResolvedRun: AgentRun = {
         { name: "sets Retry-After", passed: true, durationMs: 9 },
       ],
     },
+    criteriaEvidence("ev-br-criteria", [
+      {
+        text: "429 responses include Retry-After",
+        met: true,
+        note: "Header set on 429 in middleware",
+      },
+      {
+        text: "Scope matches product decision",
+        met: true,
+        note: "Limited to /api/public/* per your answer",
+      },
+      {
+        text: "Covered by middleware tests",
+        met: true,
+        note: "3/3 tests passing",
+      },
+    ]),
   ],
   performance: {
     criteriaMet: true,
@@ -986,6 +1128,19 @@ const failedRun: AgentRun = {
       evidenceId: "ev-f-term",
     },
     {
+      id: "f-a5",
+      type: "activity",
+      kind: "verify",
+      title: "Checking acceptance criteria",
+      detail: "3 items",
+      status: "failed",
+    },
+    {
+      id: "f-a5-result",
+      type: "result",
+      evidenceId: "ev-f-criteria",
+    },
+    {
       id: "f-m2",
       type: "message",
       role: "assistant",
@@ -1049,6 +1204,23 @@ const failedRun: AgentRun = {
         { text: "Retries exhausted (3/3)", tone: "err" },
       ],
     },
+    criteriaEvidence("ev-f-criteria", [
+      {
+        text: "20k-row fixture exports fully",
+        met: false,
+        note: "streams 20k rows test still failing",
+      },
+      {
+        text: "Memory stays bounded under backpressure",
+        met: false,
+        note: "Could not verify — export truncates early",
+      },
+      {
+        text: "Existing small-export tests still pass",
+        met: true,
+        note: "Small set and escape tests green",
+      },
+    ]),
   ],
   performance: {
     criteriaMet: false,
@@ -1123,6 +1295,19 @@ const succeededRun: AgentRun = {
       evidenceId: "ev-s-tests",
     },
     {
+      id: "s-a4",
+      type: "activity",
+      kind: "verify",
+      title: "Checking acceptance criteria",
+      detail: "3 items",
+      status: "done",
+    },
+    {
+      id: "s-a4-result",
+      type: "result",
+      evidenceId: "ev-s-criteria",
+    },
+    {
       id: "s-m2",
       type: "message",
       role: "assistant",
@@ -1175,6 +1360,23 @@ const succeededRun: AgentRun = {
         { name: "fires onCreate", passed: true, durationMs: 6 },
       ],
     },
+    criteriaEvidence("ev-s-criteria", [
+      {
+        text: "Empty state copy is clear",
+        met: true,
+        note: "Heading and subline explain the empty inbox",
+      },
+      {
+        text: "Create ticket CTA is reachable by keyboard",
+        met: true,
+        note: "Button is focusable and fires onCreate",
+      },
+      {
+        text: "Component tests cover render and click",
+        met: true,
+        note: "2/2 tests passing",
+      },
+    ]),
   ],
   performance: {
     criteriaMet: true,
@@ -1246,6 +1448,19 @@ const runningScript: AgentRun = {
       evidenceId: "ev-sc-tests",
     },
     {
+      id: "sc-a4",
+      type: "activity",
+      kind: "verify",
+      title: "Checking acceptance criteria",
+      detail: "3 items",
+      status: "done",
+    },
+    {
+      id: "sc-a4-result",
+      type: "result",
+      evidenceId: "ev-sc-criteria",
+    },
+    {
       id: "sc-m2",
       type: "message",
       role: "assistant",
@@ -1281,6 +1496,23 @@ const runningScript: AgentRun = {
         { name: "boundary day", passed: true, durationMs: 4 },
       ],
     },
+    criteriaEvidence("ev-sc-criteria", [
+      {
+        text: "Boundary-day fixture matches finance sheet",
+        met: true,
+        note: "boundary day test matches finance fixture",
+      },
+      {
+        text: "No change to upgrade proration",
+        met: true,
+        note: "Only downgrade credit path changed",
+      },
+      {
+        text: "Billing unit tests green",
+        met: true,
+        note: "3/3 tests passing",
+      },
+    ]),
   ],
   performance: {
     criteriaMet: true,
@@ -1531,6 +1763,28 @@ response writable stream before changing the public export API.`,
       prNumber: 455,
       prStatus: "open",
       prUrl: "#pr-455",
+      prTitle: "fix(export): wait for drain on CSV stream",
+      prBody: `## ENG-187
+
+Exports over ~10k rows arrive incomplete. Suspect early flush or missing drain handling on the response stream.
+
+### Acceptance criteria
+- [ ] 20k-row fixture exports fully
+- [ ] Memory stays bounded under backpressure
+- [ ] Existing small-export tests still pass
+`,
+      baseBranch: "main",
+      checks: [
+        {
+          name: "csv.stream.test",
+          status: "fail",
+          detail: "streams 20k rows failed on fixture",
+        },
+        {
+          name: "lint",
+          status: "pass",
+        },
+      ],
       commitSha: "e18bd44",
       commitMessage: "fix(export): wait for drain on CSV stream",
       comments: [
@@ -1998,6 +2252,367 @@ in the audit log.`,
       },
     },
   },
+  {
+    id: "t-dec-approval",
+    key: "ENG-245",
+    title: "Fetch latest OpenAPI schema during agent run",
+    description:
+      "Agent needs network access to pull the partner OpenAPI spec before generating the webhook client. Policy defaults deny network.",
+    criteria: [
+      "Generated client matches published schema",
+      "Network use is scoped to the schema host",
+      "No secrets written to repo",
+    ],
+    repoPath: "apps/api",
+    branch: "agent/eng-245-openapi-client",
+    priority: "high",
+    status: "blocked",
+    assignee: "agent",
+    documents: [
+      specDoc(
+        "ENG-245",
+        `# ENG-245 — OpenAPI client generation
+
+Generate a typed webhook client from the partner OpenAPI schema.
+Requires a one-time network fetch to api.partner.dev.`,
+      ),
+      {
+        id: "eng-245-client",
+        title: "partnerClient.ts",
+        path: "src/webhooks/partnerClient.ts",
+        kind: "code",
+        content: `// Stub — waiting on schema fetch permission
+export type PartnerEvent = { type: string; payload: unknown };`,
+      },
+    ],
+    delivery: delivery({
+      prNumber: null,
+      prStatus: "none",
+      commitSha: "b2c4d6e",
+      commitMessage: "chore(webhooks): scaffold partner client",
+      comments: [],
+    }),
+    run: {
+      id: "run-openapi-approval",
+      status: "blocked",
+      filesChanged: ["src/webhooks/partnerClient.ts"],
+      stages: [
+        { id: "investigate", label: "Investigate", status: "done" },
+        { id: "implement", label: "Implement", status: "active" },
+        { id: "verify", label: "Verify", status: "pending" },
+      ],
+      timeline: [
+        {
+          id: "oa-m1",
+          type: "message",
+          role: "user",
+          content: "Generate a typed client from the partner OpenAPI schema.",
+        },
+        {
+          id: "oa-a1",
+          type: "activity",
+          kind: "read",
+          title: "Reading file",
+          detail: "src/webhooks/partnerClient.ts",
+          status: "done",
+        },
+        {
+          id: "oa-a2",
+          type: "activity",
+          kind: "ask",
+          title: "Requesting permission",
+          detail: "Network access for schema fetch",
+          status: "waiting",
+        },
+        {
+          id: "oa-m2",
+          type: "message",
+          role: "assistant",
+          content:
+            "I need to fetch the OpenAPI schema from api.partner.dev before I can generate types. Your policy has network access disabled.",
+        },
+      ],
+      evidence: [
+        {
+          id: "ev-oa-file",
+          kind: "file",
+          path: "src/webhooks/partnerClient.ts",
+          content: `// Stub — waiting on schema fetch permission
+export type PartnerEvent = { type: string; payload: unknown };`,
+        },
+      ],
+      pendingDecision: pendingDecision({
+        id: "pd-245-network",
+        kind: "approval",
+        title: "Allow network access?",
+        prompt:
+          "I need to fetch the OpenAPI schema from api.partner.dev (read-only). Allow network for this run?",
+        blockingStage: "implement",
+        waitingSince: waitingSinceMinutesAgo(4),
+        askActivityId: "oa-a2",
+        options: [
+          { id: "allow", label: "Allow once" },
+          { id: "deny", label: "Deny" },
+          {
+            id: "custom",
+            label: "Specify alternative…",
+            isCustom: true,
+          },
+        ],
+        contextRefs: [
+          {
+            id: "ctx-245-policy",
+            kind: "doc",
+            label: "Network: off",
+            sublabel: "Safe playbook",
+            refId: "ENG-245-spec",
+          },
+          {
+            id: "ctx-245-host",
+            kind: "browser",
+            label: "api.partner.dev",
+            sublabel: "OpenAPI schema",
+          },
+        ],
+      }),
+    },
+  },
+  {
+    id: "t-dec-clarify",
+    key: "ENG-246",
+    title: "Flaky integration test on billing webhook",
+    description:
+      "The billing webhook integration test fails intermittently in CI. Agent reproduced locally but needs to know which environment profile to target.",
+    criteria: [
+      "Test passes reliably in CI",
+      "Uses documented test fixtures",
+      "No change to production webhook secret handling",
+    ],
+    repoPath: "apps/api",
+    branch: "agent/eng-246-billing-flake",
+    priority: "medium",
+    status: "blocked",
+    assignee: "agent",
+    documents: [
+      specDoc(
+        "ENG-246",
+        `# ENG-246 — Billing webhook flake
+
+Intermittent failure in billing webhook integration test. Reproduce
+against the correct environment profile before patching.`,
+      ),
+    ],
+    delivery: delivery({
+      prNumber: null,
+      prStatus: "none",
+      commitSha: null,
+      commitMessage: null,
+      comments: [],
+    }),
+    run: {
+      id: "run-billing-clarify",
+      status: "blocked",
+      filesChanged: [],
+      stages: [
+        { id: "investigate", label: "Investigate", status: "active" },
+        { id: "implement", label: "Implement", status: "pending" },
+        { id: "verify", label: "Verify", status: "pending" },
+      ],
+      timeline: [
+        {
+          id: "bc-m1",
+          type: "message",
+          role: "user",
+          content: "Fix the flaky billing webhook integration test.",
+        },
+        {
+          id: "bc-a1",
+          type: "activity",
+          kind: "test",
+          title: "Running tests",
+          detail: "billing/webhook.int.test.ts",
+          status: "done",
+        },
+        {
+          id: "bc-a2",
+          type: "activity",
+          kind: "ask",
+          title: "Asking user",
+          detail: "Which test environment?",
+          status: "waiting",
+        },
+      ],
+      evidence: [
+        {
+          id: "ev-bc-terminal",
+          kind: "terminal",
+          title: "vitest — billing/webhook.int.test.ts",
+          lines: [
+            { text: " RUN  billing/webhook.int.test.ts", tone: "plain" },
+            { text: "  ✓ posts invoice.paid (412ms)", tone: "ok" },
+            {
+              text: "  × retries on 502 from partner (timed out)",
+              tone: "err",
+            },
+            { text: "  Flake rate ~30% against staging mock", tone: "plain" },
+          ],
+        },
+      ],
+      pendingDecision: pendingDecision({
+        id: "pd-246-env",
+        kind: "clarification",
+        title: "Which test environment?",
+        prompt:
+          "I reproduced the flake against staging mocks (~30% failure). Which profile should I use for the fix and CI verification?",
+        blockingStage: "investigate",
+        waitingSince: waitingSinceMinutesAgo(28),
+        askActivityId: "bc-a2",
+        suggestedReplies: [
+          "Use staging mock",
+          "Use local docker compose",
+          "Match CI (ephemeral)",
+        ],
+        contextRefs: [
+          {
+            id: "ctx-246-term",
+            kind: "terminal",
+            label: "Test output",
+            sublabel: "502 timeout flake",
+            refId: "ev-bc-terminal",
+          },
+        ],
+      }),
+    },
+  },
+  {
+    id: "t-dec-review",
+    key: "ENG-247",
+    title: "Empty inbox zero-state copy mismatch",
+    description:
+      "Agent implemented new empty-state copy for the inbox, but product spec was ambiguous about tone. Needs a human judgment call before polish and screenshot tests.",
+    criteria: [
+      "Copy matches approved product tone",
+      "Empty state shows for zero threads",
+      "Screenshot test updated",
+    ],
+    repoPath: "apps/web",
+    branch: "agent/eng-247-inbox-empty",
+    priority: "medium",
+    status: "blocked",
+    assignee: "agent",
+    documents: [
+      specDoc(
+        "ENG-247",
+        `# ENG-247 — Inbox empty state
+
+Refresh empty-state copy. Spec allows either playful or neutral tone —
+confirm with product before final polish.`,
+      ),
+    ],
+    delivery: delivery({
+      prNumber: 508,
+      prStatus: "draft",
+      prUrl: "#pr-508",
+      commitSha: "d4e5f6a",
+      commitMessage: "feat(inbox): refresh empty-state copy",
+      comments: [],
+    }),
+    run: {
+      id: "run-inbox-review",
+      status: "blocked",
+      filesChanged: ["src/inbox/EmptyState.tsx"],
+      stages: [
+        { id: "investigate", label: "Investigate", status: "done" },
+        { id: "implement", label: "Implement", status: "done" },
+        { id: "verify", label: "Verify", status: "active" },
+      ],
+      timeline: [
+        {
+          id: "ir-m1",
+          type: "message",
+          role: "user",
+          content: "Update the inbox empty-state copy to match the new spec.",
+        },
+        {
+          id: "ir-a1",
+          type: "activity",
+          kind: "edit",
+          title: "Editing code",
+          detail: "src/inbox/EmptyState.tsx",
+          status: "done",
+        },
+        {
+          id: "ir-a1-result",
+          type: "result",
+          evidenceId: "ev-ir-diff",
+        },
+        {
+          id: "ir-a2",
+          type: "activity",
+          kind: "ask",
+          title: "Waiting on you",
+          detail: "Product tone check",
+          status: "waiting",
+        },
+        {
+          id: "ir-m2",
+          type: "message",
+          role: "assistant",
+          content:
+            "I implemented playful copy with an illustration cue. The spec also allows neutral — want me to keep this direction?",
+        },
+      ],
+      evidence: [
+        {
+          id: "ev-ir-diff",
+          kind: "diff",
+          path: "src/inbox/EmptyState.tsx",
+          content: `@@ -1,8 +1,10 @@
+ export function EmptyState() {
+   return (
+-    <p>No messages yet.</p>
++    <div className="empty-inbox">
++      <h2>All quiet here</h2>
++      <p>When conversations arrive, they'll land in this inbox.</p>
++    </div>
+   );
+ }`,
+        },
+      ],
+      pendingDecision: pendingDecision({
+        id: "pd-247-tone",
+        kind: "review",
+        title: "Does this match product intent?",
+        prompt:
+          "I used a friendly tone ('All quiet here') with a short subline. The spec allows playful or neutral — should I keep this direction or switch to neutral copy?",
+        blockingStage: "verify",
+        waitingSince: waitingSinceMinutesAgo(9),
+        askActivityId: "ir-a2",
+        contextRefs: [
+          {
+            id: "ctx-247-diff",
+            kind: "evidence",
+            label: "EmptyState.tsx",
+            sublabel: "src/inbox/EmptyState.tsx",
+            refId: "ev-ir-diff",
+          },
+          {
+            id: "ctx-247-spec",
+            kind: "doc",
+            label: "Spec",
+            sublabel: "Tone guidance",
+            refId: "ENG-247-spec",
+          },
+          {
+            id: "ctx-247-criteria",
+            kind: "ticket",
+            label: "3 criteria",
+            sublabel: "Copy · zero threads · screenshot",
+          },
+        ],
+      }),
+    },
+  },
   ...([
     {
       id: "t12",
@@ -2345,6 +2960,18 @@ in the audit log.`,
                   id: `run-${t.id}`,
                   status: "blocked" as const,
                   blockedQuestion: "Confirm approach before continuing?",
+                  pendingDecision: pendingDecision({
+                    id: `pd-${t.id}`,
+                    kind: "clarification" as const,
+                    title: "Confirm approach",
+                    prompt: "Confirm approach before continuing?",
+                    blockingStage: "implement" as const,
+                    waitingSince: waitingSinceMinutesAgo(15 + Number(t.id.replace(/\D/g, "")) % 40),
+                    suggestedReplies: [
+                      "Proceed with your plan",
+                      "Stop and summarize first",
+                    ],
+                  }),
                   timeline: [
                     {
                       id: `${t.id}-m1`,
@@ -2413,6 +3040,19 @@ export const idleStartScripts: Record<string, AgentRun> = {
         evidenceId: "ev-fr-tests",
       },
       {
+        id: "fr-a3",
+        type: "activity",
+        kind: "verify",
+        title: "Checking acceptance criteria",
+        detail: "3 items",
+        status: "done",
+      },
+      {
+        id: "fr-a3-result",
+        type: "result",
+        evidenceId: "ev-fr-criteria",
+      },
+      {
         id: "fr-m2",
         type: "message",
         role: "assistant",
@@ -2454,6 +3094,23 @@ export const idleStartScripts: Record<string, AgentRun> = {
           { name: "escapes commas", passed: true, durationMs: 5 },
         ],
       },
+      criteriaEvidence("ev-fr-criteria", [
+        {
+          text: "20k-row fixture exports fully",
+          met: true,
+          note: "20k-row stream test passes after drain fix",
+        },
+        {
+          text: "Memory stays bounded under backpressure",
+          met: true,
+          note: "No unbounded buffer growth in stream path",
+        },
+        {
+          text: "Existing small-export tests still pass",
+          met: true,
+          note: "3/3 tests passing",
+        },
+      ]),
     ],
     performance: {
       criteriaMet: true,

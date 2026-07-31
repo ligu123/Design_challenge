@@ -1,14 +1,24 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import type {
   AgentConfig,
+  ContextRef,
   Evidence,
   ModelEffort,
   Ticket,
   TimelineItem,
 } from "../types";
+import {
+  buildContextPickerData,
+  getMentionState,
+  toContextRef,
+  type ContextCategoryId,
+  type ContextPickerItem,
+} from "../lib/contextPicker";
 import { ActivityItem } from "./ActivityItem";
+import { ContextPicker } from "./chat/ContextPicker";
 import { ResultItem } from "./ResultItem";
-import { PerformanceSummary } from "./PerformanceSummary";
+import { PendingDecisionCard } from "./PendingDecisionCard";
+import { getPendingDecision } from "../lib/pendingDecision";
 
 const MODELS = [
   { id: "claude-sonnet", label: "claude-sonnet" },
@@ -37,8 +47,77 @@ interface ChatPanelProps {
   config: AgentConfig;
   onConfigChange: (config: AgentConfig) => void;
   onSelectEvidence: (evidenceId: string | null) => void;
-  onSelectTicket?: (ticketId: string) => void;
-  onAnswerBlocked: (answer: string) => void;
+  onAnswerBlocked: (answer: string, optionId?: string) => void;
+  onSendMessage: (payload: {
+    text: string;
+    attachments: { id: string; name: string; size: number }[];
+    contextRefs: ContextRef[];
+  }) => void;
+  onOpenPullRequestTab?: () => void;
+}
+
+const COMPOSER_PLACEHOLDER =
+  "Message the agent, @ to attach files, docs, or evidence.";
+
+function contextRefIcon(kind: ContextRef["kind"]) {
+  switch (kind) {
+    case "file":
+    case "folder":
+    case "evidence":
+      return "#";
+    case "doc":
+      return "Doc";
+    case "terminal":
+      return ">";
+    case "past-chat":
+      return "~";
+    case "branch-diff":
+      return "⎇";
+    case "browser":
+      return "Web";
+    case "ticket":
+      return "T";
+    default:
+      return "@";
+  }
+}
+
+function ContextRefChip({
+  ref: ctx,
+  onRemove,
+  onClick,
+}: {
+  ref: ContextRef;
+  onRemove?: () => void;
+  onClick?: () => void;
+}) {
+  return (
+    <span className={`context-chip context-chip-${ctx.kind}`}>
+      <button
+        type="button"
+        className="context-chip-main"
+        onClick={onClick}
+        disabled={!onClick}
+        title={ctx.sublabel ?? ctx.label}
+      >
+        <span className="context-chip-icon">{contextRefIcon(ctx.kind)}</span>
+        <span className="context-chip-label">{ctx.label}</span>
+        {ctx.sublabel && ctx.kind !== "file" && (
+          <span className="context-chip-sublabel">{ctx.sublabel}</span>
+        )}
+      </button>
+      {onRemove && (
+        <button
+          type="button"
+          className="context-chip-remove"
+          aria-label={`Remove ${ctx.label}`}
+          onClick={onRemove}
+        >
+          ×
+        </button>
+      )}
+    </span>
+  );
 }
 
 function chatTitleForTicket(ticket: Ticket) {
@@ -87,47 +166,45 @@ function showsResultCard(evidence: Evidence) {
   return evidence.kind !== "search" && evidence.kind !== "file";
 }
 
-function seedSessions(tickets: Ticket[], selectedId: string | null) {
-  const withRuns = tickets.filter(
-    (t) => t.run.timeline.length > 0 || t.status !== "idle",
-  );
-  const primary =
-    tickets.find((t) => t.id === selectedId) ?? withRuns[0] ?? tickets[0];
+interface TicketChatState {
+  sessions: ChatSession[];
+  openIds: string[];
+  activeId: string;
+}
 
-  const sessions: ChatSession[] = [];
-  if (primary) {
-    sessions.push(
-      makeSession({
-        id: `chat-${primary.id}`,
-        title: chatTitleForTicket(primary),
-        ticketId: primary.id,
-      }),
-    );
+function initialChatStateForTicket(t: Ticket): TicketChatState {
+  const sessionId = `chat-${t.id}-default`;
+  const session = makeSession({
+    id: sessionId,
+    title: chatTitleForTicket(t),
+    ticketId: t.id,
+  });
+  return {
+    sessions: [session],
+    openIds: [sessionId],
+    activeId: sessionId,
+  };
+}
+
+function seedTicketChats(
+  tickets: Ticket[],
+  selectedId: string | null,
+): Record<string, TicketChatState> {
+  const map: Record<string, TicketChatState> = {};
+  for (const t of tickets) {
+    if (
+      t.id === selectedId ||
+      t.run.timeline.length > 0 ||
+      t.status !== "idle"
+    ) {
+      map[t.id] = initialChatStateForTicket(t);
+    }
   }
-
-  for (const t of withRuns) {
-    if (t.id === primary?.id) continue;
-    if (sessions.length >= 4) break;
-    sessions.push(
-      makeSession({
-        id: `chat-${t.id}`,
-        title: chatTitleForTicket(t),
-        ticketId: t.id,
-      }),
-    );
+  if (selectedId && !map[selectedId]) {
+    const selected = tickets.find((t) => t.id === selectedId);
+    if (selected) map[selectedId] = initialChatStateForTicket(selected);
   }
-
-  if (sessions.length === 0) {
-    const blank = makeSession({
-      id: `chat-new-${Date.now()}`,
-      title: "New chat",
-      ticketId: null,
-    });
-    return { sessions: [blank], openIds: [blank.id], activeId: blank.id };
-  }
-
-  const openIds = sessions.slice(0, 2).map((s) => s.id);
-  return { sessions, openIds, activeId: openIds[0] };
+  return map;
 }
 
 function formatDuration(ms: number) {
@@ -147,22 +224,37 @@ export function ChatPanel({
   config,
   onConfigChange,
   onSelectEvidence,
-  onSelectTicket,
   onAnswerBlocked,
+  onSendMessage,
+  onOpenPullRequestTab,
 }: ChatPanelProps) {
   const streamRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const historyRef = useRef<HTMLDivElement>(null);
-  const seeded = useMemo(
-    () => seedSessions(tickets, ticket?.id ?? null),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [],
-  );
-  const [sessions, setSessions] = useState<ChatSession[]>(seeded.sessions);
-  const [openIds, setOpenIds] = useState<string[]>(seeded.openIds);
-  const [activeChatId, setActiveChatId] = useState(seeded.activeId);
+  const composerRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const pickerRef = useRef<HTMLDivElement>(null);
+  const [chatByTicket, setChatByTicket] = useState<
+    Record<string, TicketChatState>
+  >(() => seedTicketChats(tickets, ticket?.id ?? null));
+
+  const currentChatState = ticket ? chatByTicket[ticket.id] : null;
+  const sessions = currentChatState?.sessions ?? [];
+  const openIds = currentChatState?.openIds ?? [];
+  const activeChatId = currentChatState?.activeId ?? "";
+
+  const patchTicketChat = (
+    ticketId: string,
+    updater: (state: TicketChatState) => TicketChatState,
+  ) => {
+    setChatByTicket((prev) => {
+      const t = tickets.find((x) => x.id === ticketId);
+      if (!t) return prev;
+      const current = prev[ticketId] ?? initialChatStateForTicket(t);
+      return { ...prev, [ticketId]: updater(current) };
+    });
+  };
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [answer, setAnswer] = useState("");
   const [draft, setDraft] = useState("");
   const [attachments, setAttachments] = useState<
     { id: string; name: string; size: number }[]
@@ -172,23 +264,21 @@ export function ChatPanel({
   >(null);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const modelMenuRef = useRef<HTMLDivElement>(null);
+  const [contextRefs, setContextRefs] = useState<ContextRef[]>([]);
+  const [mentionOpen, setMentionOpen] = useState(false);
+  const [mentionStart, setMentionStart] = useState<number | null>(null);
+  const [mentionQuery, setMentionQuery] = useState("");
+  const [pickerCategory, setPickerCategory] = useState<ContextCategoryId | null>(
+    null,
+  );
+  const [pickerHighlight, setPickerHighlight] = useState(0);
 
-  const activeSession =
-    sessions.find((s) => s.id === activeChatId) ?? sessions[0] ?? null;
-
-  const activeTicket = useMemo(() => {
-    if (!activeSession?.ticketId) return null;
-    return tickets.find((t) => t.id === activeSession.ticketId) ?? null;
-  }, [activeSession, tickets]);
-
-  const viewTicket =
-    ticket && activeSession?.ticketId === ticket.id ? ticket : activeTicket;
+  const viewTicket = ticket;
 
   const timeline = viewTicket?.run.timeline ?? [];
-  const blocked =
-    viewTicket?.status === "blocked"
-      ? viewTicket.run.blockedQuestion
-      : undefined;
+  const pendingDecision = viewTicket
+    ? getPendingDecision(viewTicket.run)
+    : null;
 
   const runStats = useMemo(() => {
     if (!viewTicket || viewTicket.status === "idle") return null;
@@ -220,78 +310,194 @@ export function ChatPanel({
     (a, b) => b.updatedAt - a.updatedAt,
   );
 
+  const pickerData = useMemo(
+    () =>
+      buildContextPickerData(
+        viewTicket,
+        sessions,
+        activeChatId,
+        mentionQuery,
+      ),
+    [viewTicket, sessions, activeChatId, mentionQuery],
+  );
+
+  const pickerRowCount = useMemo(() => {
+    if (pickerCategory) {
+      const cat = pickerData.categories.find((c) => c.id === pickerCategory);
+      return cat?.items.length ?? 0;
+    }
+    const visibleCategories = pickerData.categories.filter(
+      (c) => c.items.length > 0,
+    );
+    return pickerData.quickPicks.length + visibleCategories.length;
+  }, [pickerData, pickerCategory]);
+
+  const closeMentionPicker = () => {
+    setMentionOpen(false);
+    setMentionStart(null);
+    setMentionQuery("");
+    setPickerCategory(null);
+    setPickerHighlight(0);
+  };
+
+  const syncMentionFromDraft = (text: string, cursor: number) => {
+    const mention = getMentionState(text, cursor);
+    if (mention) {
+      setMentionOpen(true);
+      setMentionStart(mention.start);
+      setMentionQuery(mention.query);
+      setPickerCategory(null);
+      setPickerHighlight(0);
+    } else {
+      closeMentionPicker();
+    }
+  };
+
+  const selectContextItem = (item: ContextPickerItem) => {
+    const ref = toContextRef(item);
+    setContextRefs((prev) =>
+      prev.some((r) => r.id === ref.id) ? prev : [...prev, ref],
+    );
+
+    if (mentionStart != null) {
+      const cursor = textareaRef.current?.selectionStart ?? draft.length;
+      const before = draft.slice(0, mentionStart);
+      const after = draft.slice(cursor);
+      const nextDraft = before + after;
+      setDraft(nextDraft);
+      requestAnimationFrame(() => {
+        if (textareaRef.current) {
+          textareaRef.current.selectionStart = mentionStart;
+          textareaRef.current.selectionEnd = mentionStart;
+        }
+      });
+    }
+
+    closeMentionPicker();
+    textareaRef.current?.focus();
+  };
+
+  const handleDecisionContext = (ref: ContextRef) => {
+    if (
+      (ref.kind === "file" ||
+        ref.kind === "evidence" ||
+        ref.kind === "terminal") &&
+      ref.refId
+    ) {
+      onSelectEvidence(ref.refId);
+    }
+  };
+
+  const submitDecision = (answer: string, optionId?: string) => {
+    onAnswerBlocked(answer, optionId);
+  };
+
+  const handleContextRefClick = (ctx: ContextRef) => {
+    if (ctx.kind === "past-chat" && ctx.refId) {
+      focusChat(ctx.refId);
+      return;
+    }
+    if (
+      (ctx.kind === "file" ||
+        ctx.kind === "evidence" ||
+        ctx.kind === "terminal") &&
+      ctx.refId
+    ) {
+      onSelectEvidence(ctx.refId);
+    }
+  };
+
+  const canSend =
+    Boolean(draft.trim()) ||
+    attachments.length > 0 ||
+    contextRefs.length > 0;
+
+  const sendMessage = () => {
+    if (!canSend) return;
+    onSendMessage({
+      text: draft.trim(),
+      attachments,
+      contextRefs,
+    });
+    setDraft("");
+    setAttachments([]);
+    setContextRefs([]);
+    closeMentionPicker();
+  };
+
   const focusChat = (sessionId: string) => {
+    if (!ticket) return;
     const session = sessions.find((s) => s.id === sessionId);
     if (!session) return;
-    setOpenIds((prev) =>
-      prev.includes(sessionId) ? prev : [...prev, sessionId],
-    );
-    setActiveChatId(sessionId);
+    patchTicketChat(ticket.id, (state) => ({
+      ...state,
+      openIds: state.openIds.includes(sessionId)
+        ? state.openIds
+        : [...state.openIds, sessionId],
+      activeId: sessionId,
+    }));
     setHistoryOpen(false);
     setComposerPanel(null);
     setModelMenuOpen(false);
     setDraft("");
     setAttachments([]);
-    if (session.ticketId && onSelectTicket) onSelectTicket(session.ticketId);
+    setContextRefs([]);
   };
 
   const createChat = () => {
+    if (!ticket) return;
     const session = makeSession({
-      id: `chat-new-${Date.now()}`,
+      id: `chat-${ticket.id}-${Date.now()}`,
       title: "New chat",
-      ticketId: null,
+      ticketId: ticket.id,
     });
-    setSessions((prev) => [session, ...prev]);
-    setOpenIds((prev) => [...prev, session.id]);
-    setActiveChatId(session.id);
+    patchTicketChat(ticket.id, (state) => ({
+      sessions: [session, ...state.sessions],
+      openIds: [...state.openIds, session.id],
+      activeId: session.id,
+    }));
     setHistoryOpen(false);
     setDraft("");
     setAttachments([]);
+    setContextRefs([]);
   };
 
   const closeChat = (sessionId: string, e?: MouseEvent) => {
     e?.stopPropagation();
-    const remaining = openIds.filter((id) => id !== sessionId);
-    setOpenIds(remaining);
-    if (activeChatId === sessionId) {
-      const nextId = remaining[remaining.length - 1];
-      if (nextId) focusChat(nextId);
-      else {
-        const session = makeSession({
-          id: `chat-new-${Date.now()}`,
-          title: "New chat",
-          ticketId: null,
-        });
-        setSessions((prev) => [session, ...prev]);
-        setOpenIds([session.id]);
-        setActiveChatId(session.id);
+    if (!ticket) return;
+    patchTicketChat(ticket.id, (state) => {
+      const remaining = state.openIds.filter((id) => id !== sessionId);
+      if (state.activeId !== sessionId) {
+        return { ...state, openIds: remaining };
       }
+      const nextId = remaining[remaining.length - 1];
+      if (nextId) {
+        return { ...state, openIds: remaining, activeId: nextId };
+      }
+      const session = makeSession({
+        id: `chat-${ticket.id}-${Date.now()}`,
+        title: chatTitleForTicket(ticket),
+        ticketId: ticket.id,
+      });
+      return {
+        sessions: [session, ...state.sessions],
+        openIds: [session.id],
+        activeId: session.id,
+      };
+    });
+    if (activeChatId === sessionId) {
+      setDraft("");
+      setAttachments([]);
+      setContextRefs([]);
     }
   };
 
   useEffect(() => {
     if (!ticket) return;
-    const id = `chat-${ticket.id}`;
-    setSessions((prev) => {
-      const existing = prev.find((s) => s.ticketId === ticket.id || s.id === id);
-      if (existing) {
-        return prev.map((s) =>
-          s.id === existing.id
-            ? { ...s, title: chatTitleForTicket(ticket), updatedAt: Date.now() }
-            : s,
-        );
-      }
-      return [
-        makeSession({
-          id,
-          title: chatTitleForTicket(ticket),
-          ticketId: ticket.id,
-        }),
-        ...prev,
-      ];
+    setChatByTicket((prev) => {
+      if (prev[ticket.id]) return prev;
+      return { ...prev, [ticket.id]: initialChatStateForTicket(ticket) };
     });
-    setOpenIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
-    setActiveChatId(id);
   }, [ticket?.id]);
 
   useEffect(() => {
@@ -307,15 +513,16 @@ export function ChatPanel({
   ]);
 
   useEffect(() => {
-    setAnswer("");
     setDraft("");
     setAttachments([]);
+    setContextRefs([]);
+    closeMentionPicker();
     setComposerPanel(null);
     setModelMenuOpen(false);
   }, [activeChatId]);
 
   useEffect(() => {
-    if (!modelMenuOpen && !historyOpen) return;
+    if (!modelMenuOpen && !historyOpen && !mentionOpen) return;
     const onPointerDown = (e: PointerEvent) => {
       if (
         modelMenuRef.current &&
@@ -329,10 +536,19 @@ export function ChatPanel({
       ) {
         setHistoryOpen(false);
       }
+      if (
+        mentionOpen &&
+        pickerRef.current &&
+        !pickerRef.current.contains(e.target as Node) &&
+        textareaRef.current &&
+        !textareaRef.current.contains(e.target as Node)
+      ) {
+        closeMentionPicker();
+      }
     };
     document.addEventListener("pointerdown", onPointerDown);
     return () => document.removeEventListener("pointerdown", onPointerDown);
-  }, [modelMenuOpen, historyOpen]);
+  }, [modelMenuOpen, historyOpen, mentionOpen]);
 
   const delivery = viewTicket?.delivery;
 
@@ -368,14 +584,7 @@ export function ChatPanel({
     <aside className="chat-panel">
       <div className="chat-tabs-bar">
         <div className="chat-tabs" role="tablist" aria-label="Chats">
-          {openSessions.map((session) => {
-            const linked = session.ticketId
-              ? tickets.find((t) => t.id === session.ticketId)
-              : null;
-            const tabTitle = linked
-              ? `${linked.key} · ${session.title}`
-              : session.title;
-            return (
+          {openSessions.map((session) => (
             <div
               key={session.id}
               className={`chat-tab${session.id === activeChatId ? " active" : ""}`}
@@ -385,7 +594,7 @@ export function ChatPanel({
                 role="tab"
                 className="chat-tab-main"
                 aria-selected={session.id === activeChatId}
-                title={tabTitle}
+                title={session.title}
                 onClick={() => focusChat(session.id)}
               >
                 {session.title}
@@ -399,8 +608,7 @@ export function ChatPanel({
                 ×
               </button>
             </div>
-            );
-          })}
+          ))}
         </div>
 
         <button
@@ -408,6 +616,7 @@ export function ChatPanel({
           className="chat-icon-btn chat-new-btn"
           title="New chat"
           aria-label="New chat"
+          disabled={!ticket}
           onClick={createChat}
         >
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
@@ -459,11 +668,7 @@ export function ChatPanel({
                 <p className="chat-history-empty">No chats yet.</p>
               ) : (
                 <ul className="chat-history-list">
-                  {historySessions.map((session) => {
-                    const linked = session.ticketId
-                      ? tickets.find((t) => t.id === session.ticketId)
-                      : null;
-                    return (
+                  {historySessions.map((session) => (
                       <li key={session.id}>
                         <button
                           type="button"
@@ -479,16 +684,13 @@ export function ChatPanel({
                             {session.title}
                           </span>
                           <span className="chat-history-sub">
-                            {linked
-                              ? linked.key
-                              : session.ticketId
-                                ? "Ticket chat"
-                                : "Empty chat"}
+                            {session.id === activeChatId
+                              ? "Active"
+                              : "Past chat"}
                           </span>
                         </button>
                       </li>
-                    );
-                  })}
+                    ))}
                 </ul>
               )}
             </div>
@@ -499,22 +701,50 @@ export function ChatPanel({
       <div className="chat-stream" ref={streamRef}>
         {!viewTicket && (
           <div className="chat-empty">
-            Start a conversation, or open a ticket chat from history.
+            Select a ticket to view its agent chats.
           </div>
         )}
-        {viewTicket && timeline.length === 0 && (
-          <div className="chat-empty">
-            {viewTicket.status === "idle"
-              ? "No agent activity yet. Resolve the ticket to begin."
-              : "No agent activity yet."}
+        {viewTicket && timeline.length === 0 && viewTicket.status === "idle" && (
+          <div className="chat-welcome">
+            <h2 className="chat-welcome-title">
+              <span className="mono">{viewTicket.key}</span> is ready for the
+              agent
+            </h2>
+            <p className="chat-welcome-body">
+              The agent will investigate the codebase, implement against the
+              acceptance criteria, and run tests. You&apos;ll review the diff and
+              open a PR when it&apos;s done.
+            </p>
           </div>
         )}
+        {viewTicket &&
+          timeline.length === 0 &&
+          viewTicket.status !== "idle" && (
+            <div className="chat-empty">No agent activity yet.</div>
+          )}
         {groupTimeline(timeline).map((group) => {
           if (group.type === "message") {
             const item = group.item;
             return (
               <div key={item.id} className={`message message-${item.role}`}>
-                <div className="message-body">{item.content}</div>
+                {item.contextRefs && item.contextRefs.length > 0 && (
+                  <div className="message-context-refs">
+                    {item.contextRefs.map((ctx) => (
+                      <ContextRefChip
+                        key={ctx.id}
+                        ref={ctx}
+                        onClick={
+                          item.role === "user"
+                            ? () => handleContextRefClick(ctx)
+                            : undefined
+                        }
+                      />
+                    ))}
+                  </div>
+                )}
+                {item.content ? (
+                  <div className="message-body">{item.content}</div>
+                ) : null}
               </div>
             );
           }
@@ -556,31 +786,14 @@ export function ChatPanel({
         })}
       </div>
 
-      {viewTicket?.status === "succeeded" && viewTicket.run.performance && (
-        <PerformanceSummary metrics={viewTicket.run.performance} />
-      )}
-
-      {blocked && (
-        <div className="blocked-prompt">
-          <p>
-            <strong>Waiting on you.</strong> {blocked}
-          </p>
-          <textarea
-            value={answer}
-            onChange={(e) => setAnswer(e.target.value)}
-            placeholder="Type your answer…"
+      {pendingDecision && viewTicket?.status === "blocked" && (
+        <div className="pending-decision-wrap">
+          <PendingDecisionCard
+            decision={pendingDecision}
+            stages={viewTicket.run.stages}
+            onSubmit={submitDecision}
+            onContextClick={handleDecisionContext}
           />
-          <button
-            type="button"
-            className="btn btn-primary"
-            disabled={!answer.trim()}
-            onClick={() => {
-              onAnswerBlocked(answer.trim());
-              setAnswer("");
-            }}
-          >
-            Reply to agent
-          </button>
         </div>
       )}
 
@@ -679,48 +892,176 @@ export function ChatPanel({
           </div>
         )}
 
-        <div className="chat-composer-shell">
-          {attachments.length > 0 && (
-            <ul className="chat-attachments">
-              {attachments.map((file) => (
-                <li key={file.id}>
-                  <span className="mono">{file.name}</span>
-                  <button
-                    type="button"
-                    className="chat-attach-remove"
-                    aria-label={`Remove ${file.name}`}
-                    onClick={() =>
-                      setAttachments((prev) =>
-                        prev.filter((f) => f.id !== file.id),
-                      )
-                    }
-                  >
-                    ×
-                  </button>
-                </li>
-              ))}
-            </ul>
+        <div className="chat-composer-shell" ref={composerRef}>
+          {(attachments.length > 0 || contextRefs.length > 0) && (
+            <div className="chat-composer-meta">
+              {contextRefs.length > 0 && (
+                <div className="context-chip-row">
+                  {contextRefs.map((ctx) => (
+                    <ContextRefChip
+                      key={ctx.id}
+                      ref={ctx}
+                      onClick={() => handleContextRefClick(ctx)}
+                      onRemove={() =>
+                        setContextRefs((prev) =>
+                          prev.filter((r) => r.id !== ctx.id),
+                        )
+                      }
+                    />
+                  ))}
+                </div>
+              )}
+              {attachments.length > 0 && (
+                <ul className="chat-attachments">
+                  {attachments.map((file) => (
+                    <li key={file.id}>
+                      <span className="mono">{file.name}</span>
+                      <button
+                        type="button"
+                        className="chat-attach-remove"
+                        aria-label={`Remove ${file.name}`}
+                        onClick={() =>
+                          setAttachments((prev) =>
+                            prev.filter((f) => f.id !== file.id),
+                          )
+                        }
+                      >
+                        ×
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           )}
 
-          <textarea
-            className="chat-composer-field"
-            rows={1}
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            placeholder="Message agent"
-            disabled={!viewTicket || viewTicket.status === "idle"}
-            onKeyDown={(e) => {
-              if (
-                e.key === "Enter" &&
-                !e.shiftKey &&
-                (draft.trim() || attachments.length)
-              ) {
-                e.preventDefault();
-                setDraft("");
-                setAttachments([]);
-              }
-            }}
-          />
+          <div className="chat-composer-input-wrap">
+            {mentionOpen && (
+              <div className="context-picker-wrap" ref={pickerRef}>
+                <ContextPicker
+                  quickPicks={pickerData.quickPicks}
+                  categories={pickerData.categories}
+                  activeCategory={pickerCategory}
+                  highlightIndex={pickerHighlight}
+                  onSelectItem={selectContextItem}
+                  onOpenCategory={(id) => {
+                    setPickerCategory(id);
+                    setPickerHighlight(0);
+                  }}
+                  onBack={() => {
+                    setPickerCategory(null);
+                    setPickerHighlight(0);
+                  }}
+                  onHighlightChange={setPickerHighlight}
+                />
+              </div>
+            )}
+
+            <textarea
+              ref={textareaRef}
+              className="chat-composer-field"
+              rows={1}
+              value={draft}
+              onChange={(e) => {
+                setDraft(e.target.value);
+                syncMentionFromDraft(
+                  e.target.value,
+                  e.target.selectionStart ?? e.target.value.length,
+                );
+              }}
+              onClick={(e) => {
+                const target = e.currentTarget;
+                syncMentionFromDraft(
+                  target.value,
+                  target.selectionStart ?? target.value.length,
+                );
+              }}
+              placeholder={COMPOSER_PLACEHOLDER}
+              disabled={!viewTicket}
+              onKeyDown={(e) => {
+                if (mentionOpen && pickerRowCount > 0) {
+                  if (e.key === "ArrowDown") {
+                    e.preventDefault();
+                    setPickerHighlight((i) =>
+                      i + 1 >= pickerRowCount ? 0 : i + 1,
+                    );
+                    return;
+                  }
+                  if (e.key === "ArrowUp") {
+                    e.preventDefault();
+                    setPickerHighlight((i) =>
+                      i - 1 < 0 ? pickerRowCount - 1 : i - 1,
+                    );
+                    return;
+                  }
+                  if (e.key === "Escape") {
+                    e.preventDefault();
+                    if (pickerCategory) {
+                      setPickerCategory(null);
+                      setPickerHighlight(0);
+                    } else {
+                      closeMentionPicker();
+                    }
+                    return;
+                  }
+                  if (e.key === "Enter" || e.key === "Tab") {
+                    e.preventDefault();
+                    if (pickerCategory) {
+                      const cat = pickerData.categories.find(
+                        (c) => c.id === pickerCategory,
+                      );
+                      const item = cat?.items[pickerHighlight];
+                      if (item) selectContextItem(item);
+                    } else {
+                      const visibleCategories = pickerData.categories.filter(
+                        (c) => c.items.length > 0,
+                      );
+                      if (pickerHighlight < pickerData.quickPicks.length) {
+                        const item = pickerData.quickPicks[pickerHighlight];
+                        if (item) selectContextItem(item);
+                      } else {
+                        const catIdx =
+                          pickerHighlight - pickerData.quickPicks.length;
+                        const cat = visibleCategories[catIdx];
+                        if (cat) {
+                          setPickerCategory(cat.id);
+                          setPickerHighlight(0);
+                        }
+                      }
+                    }
+                    return;
+                  }
+                  if (e.key === "ArrowRight" && !pickerCategory) {
+                    const visibleCategories = pickerData.categories.filter(
+                      (c) => c.items.length > 0,
+                    );
+                    if (pickerHighlight >= pickerData.quickPicks.length) {
+                      e.preventDefault();
+                      const catIdx =
+                        pickerHighlight - pickerData.quickPicks.length;
+                      const cat = visibleCategories[catIdx];
+                      if (cat) {
+                        setPickerCategory(cat.id);
+                        setPickerHighlight(0);
+                      }
+                    }
+                    return;
+                  }
+                  if (e.key === "ArrowLeft" && pickerCategory) {
+                    e.preventDefault();
+                    setPickerCategory(null);
+                    setPickerHighlight(0);
+                    return;
+                  }
+                }
+
+                if (e.key === "Enter" && !e.shiftKey && canSend) {
+                  e.preventDefault();
+                  sendMessage();
+                }
+              }}
+            />
+          </div>
 
           <div className="chat-composer-toolbar">
             <div className="chat-composer-tools">
@@ -819,11 +1160,18 @@ export function ChatPanel({
                     className={`chat-icon-btn${composerPanel === "pr" ? " active" : ""}`}
                     title={
                       delivery?.prStatus === "none"
-                        ? "No pull request"
+                        ? "Pull request"
                         : `${prLabel} · ${delivery?.prStatus}`
                     }
                     aria-label="Pull request"
-                    onClick={() => togglePanel("pr")}
+                    onClick={() => {
+                      if (onOpenPullRequestTab) {
+                        onOpenPullRequestTab();
+                        setComposerPanel(null);
+                      } else {
+                        togglePanel("pr");
+                      }
+                    }}
                   >
                     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
                       <circle cx="6" cy="6" r="2.25" stroke="currentColor" strokeWidth="1.75" />
@@ -887,11 +1235,8 @@ export function ChatPanel({
                 type="button"
                 className="chat-send-btn"
                 aria-label="Send"
-                disabled={!draft.trim() && attachments.length === 0}
-                onClick={() => {
-                  setDraft("");
-                  setAttachments([]);
-                }}
+                disabled={!canSend}
+                onClick={sendMessage}
               >
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
                   <path

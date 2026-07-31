@@ -4,6 +4,7 @@ import { FileView } from "./FileView";
 import { SearchView } from "./SearchView";
 import { TerminalView } from "./TerminalView";
 import { TestResultsView } from "./TestResultsView";
+import { CriteriaResultsView } from "./CriteriaResultsView";
 
 export function EvidencePanel({
   evidence,
@@ -22,6 +23,8 @@ export function EvidencePanel({
       return <TerminalView evidence={evidence} compact={compact} />;
     case "tests":
       return <TestResultsView evidence={evidence} compact={compact} />;
+    case "criteria":
+      return <CriteriaResultsView evidence={evidence} compact={compact} />;
     case "search":
       return <SearchView evidence={evidence} compact={compact} />;
   }

@@ -1,14 +1,18 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type {
+  CenterTab,
+  DiffEvidence,
   Evidence,
   Priority,
   PrStatus,
   ReviewDecision,
   Ticket,
 } from "../types";
-import { DiffCodeBlock, summarizeDiff } from "./DiffCodeBlock";
+import { summarizeDiff } from "./DiffCodeBlock";
 import { DocsBrowser } from "./DocsBrowser";
 import { EvidencePanel } from "./evidence/EvidencePanel";
+import { DiffAccordionItem } from "./DiffAccordionItem";
+import { PullRequestPanel } from "./PullRequestPanel";
 import { PriorityIcon, StatusChip } from "./StatusChip";
 
 interface TicketDetailProps {
@@ -23,14 +27,42 @@ interface TicketDetailProps {
   onChangeAssignee?: (assignee: string) => void;
   onAddComment?: (body: string, parentId?: string) => void;
   onDeleteComment?: (commentId: string) => void;
+  centerTab?: CenterTab;
+  onCenterTabChange?: (tab: CenterTab) => void;
+  onOpenPullRequest?: (payload: {
+    title: string;
+    body: string;
+    asDraft: boolean;
+  }) => void;
+  onMarkReadyForReview?: () => void;
 }
 
 const COMMENT_AUTHOR = "maya";
 
-type CenterTab = "ticket" | "documents" | "tests" | "evidence";
-
 const PRIORITY_OPTIONS: Priority[] = ["high", "medium", "low"];
 const ASSIGNEE_OPTIONS = ["agent", "unassigned", "maya", "jordan"] as const;
+const RESOLVE_OPTIONS: ReviewDecision[] = [
+  "todo",
+  "in_progress",
+  "approved",
+  "changes_requested",
+  "merged",
+];
+
+function resolveLabel(decision: ReviewDecision) {
+  switch (decision) {
+    case "todo":
+      return "To-do";
+    case "in_progress":
+      return "In progress";
+    case "approved":
+      return "Resolved";
+    case "changes_requested":
+      return "Changes requested";
+    case "merged":
+      return "Merged";
+  }
+}
 
 function MetaChevron() {
   return (
@@ -97,6 +129,54 @@ function MetaAssigneeIcon() {
         strokeWidth="1.4"
         strokeLinecap="round"
       />
+    </svg>
+  );
+}
+
+function MetaResolveIcon({ state }: { state: ReviewDecision }) {
+  if (state === "approved" || state === "merged") {
+    return (
+      <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden>
+        <circle cx="8" cy="8" r="5.25" stroke="currentColor" strokeWidth="1.4" />
+        <path
+          d="M5.5 8.1 7.2 9.8 10.6 6.2"
+          stroke="currentColor"
+          strokeWidth="1.4"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    );
+  }
+  if (state === "changes_requested") {
+    return (
+      <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden>
+        <circle cx="8" cy="8" r="5.25" stroke="currentColor" strokeWidth="1.4" />
+        <path
+          d="M8 5.25v3.5M8 10.75h.01"
+          stroke="currentColor"
+          strokeWidth="1.4"
+          strokeLinecap="round"
+        />
+      </svg>
+    );
+  }
+  if (state === "in_progress") {
+    return (
+      <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden>
+        <circle cx="8" cy="8" r="5.25" stroke="currentColor" strokeOpacity="0.25" strokeWidth="1.4" />
+        <path
+          d="M8 2.75a5.25 5.25 0 0 1 0 10.5"
+          stroke="currentColor"
+          strokeWidth="1.4"
+          strokeLinecap="round"
+        />
+      </svg>
+    );
+  }
+  return (
+    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden>
+      <circle cx="8" cy="8" r="5.25" stroke="currentColor" strokeWidth="1.4" />
     </svg>
   );
 }
@@ -183,15 +263,12 @@ function toneClass(value: string): string {
   if (value === "unassigned") return "unassigned";
   if (value === "maya") return "maya";
   if (value === "jordan") return "jordan";
+  if (value === "todo") return "resolve-todo";
+  if (value === "in_progress") return "resolve-in-progress";
+  if (value === "approved") return "resolve-approved";
+  if (value === "changes_requested") return "resolve-changes";
+  if (value === "merged") return "resolve-merged";
   return "neutral";
-}
-
-function evidenceForPath(evidence: Evidence[], path: string): Evidence | null {
-  return (
-    evidence.find((e) => e.kind === "diff" && e.path === path) ??
-    evidence.find((e) => e.kind === "file" && e.path === path) ??
-    null
-  );
 }
 
 function latestTestEvidence(evidence: Evidence[]): Evidence | null {
@@ -305,22 +382,46 @@ function buildIssueEvents(ticket: Ticket, nowMs: number): IssueEvent[] {
   return events;
 }
 
+function TicketDiffResults({
+  diffs,
+  selectedEvidenceId,
+  onSelectEvidence,
+}: {
+  diffs: DiffEvidence[];
+  selectedEvidenceId: string | null;
+  onSelectEvidence: (evidenceId: string) => void;
+}) {
+  return (
+    <div className="ticket-diff-results">
+      {diffs.map((diff) => (
+        <DiffAccordionItem
+          key={diff.id}
+          diff={diff}
+          selected={selectedEvidenceId === diff.id}
+          onOpenDiff={() => onSelectEvidence(diff.id)}
+        />
+      ))}
+    </div>
+  );
+}
+
 export function TicketDetail({
   ticket,
   selectedEvidenceId,
   onSelectEvidence,
   onStart,
-  starting,
-  decision = "awaiting",
+  decision = "todo",
   onDecide,
   onChangePriority,
   onChangeAssignee,
   onAddComment,
   onDeleteComment,
+  centerTab: centerTabProp,
+  onCenterTabChange,
+  onOpenPullRequest,
+  onMarkReadyForReview,
 }: TicketDetailProps) {
   const canStart = ticket.status === "idle" || ticket.status === "failed";
-  const reviewable =
-    ticket.status === "succeeded" || ticket.status === "failed";
   const run = ticket.run;
   const documents = ticket.documents;
   const comments = ticket.delivery.comments;
@@ -355,7 +456,7 @@ export function TicketDetail({
   };
 
   const diffs = useMemo(
-    () => run.evidence.filter((e) => e.kind === "diff"),
+    () => run.evidence.filter((e): e is DiffEvidence => e.kind === "diff"),
     [run.evidence],
   );
   const hasChanges = run.filesChanged.length > 0 || diffs.length > 0;
@@ -374,27 +475,20 @@ export function TicketDetail({
       run.evidence.find((e) => e.id === selectedEvidenceId)) ||
     null;
 
-  const defaultFile =
-    run.filesChanged.find((p) =>
-      run.evidence.some((e) => e.kind === "diff" && e.path === p),
-    ) ??
-    diffs[0]?.path ??
-    run.filesChanged[0] ??
-    null;
-
-  const [selectedFile, setSelectedFile] = useState<string | null>(defaultFile);
-  const [tab, setTab] = useState<CenterTab>("ticket");
+  const [internalTab, setInternalTab] = useState<CenterTab>("ticket");
+  const tab = centerTabProp ?? internalTab;
+  const setTab = onCenterTabChange ?? setInternalTab;
   const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
-  const [changesOpen, setChangesOpen] = useState(false);
   const [nowMs, setNowMs] = useState(() => Date.now());
   // Stable base so relative activity times age from first view of this ticket.
   const eventBaseMs = useMemo(() => Date.now(), [ticket.id]);
 
+  const hasPr =
+    ticket.delivery.prNumber != null && ticket.delivery.prStatus !== "none";
+
   useEffect(() => {
-    setSelectedFile(defaultFile);
     setTab("ticket");
     setSelectedDocId(null);
-    setChangesOpen(false);
   }, [ticket.id]);
 
   useEffect(() => {
@@ -403,42 +497,25 @@ export function TicketDetail({
   }, []);
 
   useEffect(() => {
-    if (!selectedFile && defaultFile) {
-      setSelectedFile(defaultFile);
-    }
-  }, [defaultFile, selectedFile]);
-
-  useEffect(() => {
     if (!selectedEvidence) return;
-    if (selectedEvidence.kind === "diff" || selectedEvidence.kind === "file") {
-      setSelectedFile(selectedEvidence.path);
+    if (selectedEvidence.kind === "file") {
       const match = documents.find((d) => d.path === selectedEvidence.path);
       if (match) setSelectedDocId(match.id);
     }
   }, [selectedEvidence, documents]);
 
-  const fileEvidence = selectedFile
-    ? evidenceForPath(run.evidence, selectedFile)
-    : null;
+  useEffect(() => {
+    if (tab !== "evidence" || !selectedEvidenceId) return;
+    document
+      .querySelector(`[data-result="${selectedEvidenceId}"]`)
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [tab, selectedEvidenceId]);
 
   const criteriaMet =
     ticket.status === "succeeded" && Boolean(run.performance?.criteriaMet);
 
   const showActivityEvidence =
-    selectedEvidence &&
-    !(
-      fileEvidence &&
-      selectedEvidence.id === fileEvidence.id &&
-      (selectedEvidence.kind === "diff" || selectedEvidence.kind === "file")
-    );
-
-  const openDocumentByPath = (path: string) => {
-    const match = documents.find((d) => d.path === path);
-    if (match) {
-      setSelectedDocId(match.id);
-      setTab("documents");
-    }
-  };
+    selectedEvidence && selectedEvidence.kind !== "diff";
 
   const changedPaths = useMemo(
     () =>
@@ -483,8 +560,21 @@ export function TicketDetail({
           aria-selected={tab === "documents"}
           onClick={() => setTab("documents")}
         >
-          Documents
+          Files
           <span className="ticket-tab-count">{documents.length}</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          className={tab === "evidence" ? "active" : undefined}
+          aria-selected={tab === "evidence"}
+          disabled={!hasChanges}
+          onClick={() => hasChanges && setTab("evidence")}
+        >
+          Diff
+          {changedPaths.length > 0 ? (
+            <span className="ticket-tab-count">{changedPaths.length}</span>
+          ) : null}
         </button>
         <button
           type="button"
@@ -504,17 +594,19 @@ export function TicketDetail({
         <button
           type="button"
           role="tab"
-          className={tab === "evidence" ? "active" : undefined}
-          aria-selected={tab === "evidence"}
-          disabled={!selectedEvidence}
-          onClick={() => selectedEvidence && setTab("evidence")}
+          className={tab === "pr" ? "active" : undefined}
+          aria-selected={tab === "pr"}
+          onClick={() => setTab("pr")}
         >
-          Diff
+          Pull request
+          {hasPr ? (
+            <span className="ticket-tab-count">#{ticket.delivery.prNumber}</span>
+          ) : null}
         </button>
       </div>
 
-      {tab === "evidence" && selectedEvidence ? (
-        <div className="ticket-evidence-focus">
+      {tab === "evidence" && hasChanges ? (
+        <div className="ticket-diffs-view">
           <div className="ticket-detail-top">
             <div>
               <nav className="ticket-breadcrumb" aria-label="Breadcrumb">
@@ -529,26 +621,26 @@ export function TicketDetail({
                 <span>Diff</span>
               </nav>
               <h1>
-                {selectedEvidence.kind === "diff" ||
-                selectedEvidence.kind === "file"
-                  ? selectedEvidence.path
-                  : selectedEvidence.kind === "search"
-                    ? selectedEvidence.query
-                    : selectedEvidence.kind === "tests" ||
-                        selectedEvidence.kind === "terminal"
-                      ? selectedEvidence.title
-                      : "Diff"}
+                Changes
+                <span className="section-meta">
+                  {diffs.length} file
+                  {diffs.length === 1 ? "" : "s"}
+                </span>
               </h1>
             </div>
           </div>
-          <EvidencePanel evidence={selectedEvidence} compact />
+          <TicketDiffResults
+            diffs={diffs}
+            selectedEvidenceId={selectedEvidenceId}
+            onSelectEvidence={onSelectEvidence}
+          />
         </div>
       ) : null}
 
       {tab === "documents" ? (
         <div className="ticket-documents">
           {documents.length === 0 ? (
-            <p className="muted-note">No documents attached yet.</p>
+            <p className="muted-note">No files yet.</p>
           ) : (
             <DocsBrowser
               ticketKey={ticket.key}
@@ -659,6 +751,22 @@ export function TicketDetail({
         </div>
       ) : null}
 
+      {tab === "pr" && onOpenPullRequest ? (
+        <PullRequestPanel
+          ticket={ticket}
+          run={run}
+          diffs={diffs}
+          changeStats={changeStats}
+          testPassCount={testPassCount}
+          testTotalCount={testTotalCount}
+          onOpenPullRequest={onOpenPullRequest}
+          onMarkReadyForReview={() => onMarkReadyForReview?.()}
+          onAddComment={(body) => onAddComment?.(body)}
+          onViewTests={() => hasTests && setTab("tests")}
+          onViewDiff={() => hasChanges && setTab("evidence")}
+        />
+      ) : null}
+
       {tab === "ticket" ? (
         <>
           <div className="ticket-detail-top">
@@ -673,31 +781,6 @@ export function TicketDetail({
               <div className="ticket-title-row">
                 <h1>{ticket.title}</h1>
                 <StatusChip status={ticket.status} />
-                {decision === "merged" || decision === "approved" ? (
-                  <span className="ticket-state-badge is-resolved">
-                    Resolved
-                  </span>
-                ) : (
-                  <button
-                    type="button"
-                    className="ticket-state-badge"
-                    disabled={
-                      starting ||
-                      (!canStart &&
-                        !(
-                          reviewable &&
-                          ticket.status === "succeeded" &&
-                          onDecide
-                        ))
-                    }
-                    onClick={() => {
-                      if (canStart) onStart();
-                      else if (reviewable && onDecide) onDecide("approved");
-                    }}
-                  >
-                    Resolve
-                  </button>
-                )}
               </div>
             </div>
           </div>
@@ -731,6 +814,21 @@ export function TicketDetail({
               renderIcon={() => <MetaAssigneeIcon />}
               onChange={(assignee) => onChangeAssignee?.(assignee)}
             />
+            {onDecide ? (
+              <MetaSelect
+                value={decision}
+                options={RESOLVE_OPTIONS}
+                label={`Resolution ${resolveLabel(decision)}`}
+                renderIcon={(state) => <MetaResolveIcon state={state} />}
+                renderOptionLabel={resolveLabel}
+                onChange={(next) => {
+                  if (next === "approved" && canStart) {
+                    onStart();
+                  }
+                  onDecide(next);
+                }}
+              />
+            ) : null}
           </div>
 
           <section className="ticket-section">
@@ -758,124 +856,20 @@ export function TicketDetail({
             </ul>
           </section>
 
-          {hasChanges && (
+          {hasChanges && diffs.length > 0 && (
             <section className="ticket-section changes-section">
-              <div
-                className={`changes-accordion${changesOpen ? " open" : ""}`}
-              >
-                <button
-                  type="button"
-                  className="changes-accordion-trigger"
-                  aria-expanded={changesOpen}
-                  onClick={() => setChangesOpen((open) => !open)}
-                >
-                  <span className="changes-accordion-label">
-                    <span className="section-label">
-                      Changes
-                      <span className="section-meta">
-                        {changedPaths.length} file
-                        {changedPaths.length === 1 ? "" : "s"}
-                      </span>
-                    </span>
-                    <span className="changes-stat-pills" aria-hidden>
-                      {changeStats.added > 0 && (
-                        <span className="changes-stat add">
-                          +{changeStats.added}
-                        </span>
-                      )}
-                      {changeStats.removed > 0 && (
-                        <span className="changes-stat del">
-                          −{changeStats.removed}
-                        </span>
-                      )}
-                    </span>
-                  </span>
-                  <span className="changes-accordion-chevron" aria-hidden>
-                    {changesOpen ? "▾" : "▸"}
-                  </span>
-                </button>
-
-                {changesOpen && (
-                  <div className="changes-layout">
-                    <ul
-                      className="changed-files"
-                      role="listbox"
-                      aria-label="Files changed"
-                    >
-                      {changedPaths.map((path) => {
-                        const hasDiff = run.evidence.some(
-                          (e) => e.kind === "diff" && e.path === path,
-                        );
-                        const hasDoc = documents.some((d) => d.path === path);
-                        return (
-                          <li key={path}>
-                            <button
-                              type="button"
-                              role="option"
-                              aria-selected={selectedFile === path}
-                              className={
-                                selectedFile === path
-                                  ? "file-btn active"
-                                  : "file-btn"
-                              }
-                              onClick={() => {
-                                setSelectedFile(path);
-                                const ev = evidenceForPath(run.evidence, path);
-                                if (ev) onSelectEvidence(ev.id);
-                              }}
-                            >
-                              <span className="file-btn-name">{path}</span>
-                              <span className="file-btn-tag">
-                                {hasDiff ? "diff" : "file"}
-                              </span>
-                            </button>
-                            {hasDoc && (
-                              <button
-                                type="button"
-                                className="docs-open-link"
-                                onClick={() => openDocumentByPath(path)}
-                              >
-                                Open document
-                              </button>
-                            )}
-                          </li>
-                        );
-                      })}
-                    </ul>
-                    <div className="changes-preview">
-                      {fileEvidence?.kind === "diff" && (
-                        <>
-                          <div className="changes-preview-header">
-                            <span>Diff</span>
-                            <span className="mono">{fileEvidence.path}</span>
-                          </div>
-                          <DiffCodeBlock content={fileEvidence.content} />
-                        </>
-                      )}
-                      {fileEvidence?.kind === "file" && (
-                        <>
-                          <div className="changes-preview-header">
-                            <span>File</span>
-                            <span className="mono">{fileEvidence.path}</span>
-                          </div>
-                          <pre className="code-block">{fileEvidence.content}</pre>
-                        </>
-                      )}
-                      {!fileEvidence && selectedFile && (
-                        <p className="muted-note">
-                          No preview available for{" "}
-                          <span className="mono">{selectedFile}</span>
-                        </p>
-                      )}
-                      {!selectedFile && (
-                        <p className="muted-note">
-                          Select a file to inspect changes.
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                )}
+              <div className="section-label">
+                Changes
+                <span className="section-meta">
+                  {diffs.length} file
+                  {diffs.length === 1 ? "" : "s"}
+                </span>
               </div>
+              <TicketDiffResults
+                diffs={diffs}
+                selectedEvidenceId={selectedEvidenceId}
+                onSelectEvidence={onSelectEvidence}
+              />
             </section>
           )}
 
@@ -1199,48 +1193,6 @@ export function TicketDetail({
               </div>
               <div className="activity-evidence-embed">
                 <EvidencePanel evidence={selectedEvidence} />
-              </div>
-            </section>
-          )}
-
-          {reviewable && onDecide && (
-            <section className="ticket-section">
-              <div className="section-label">Decision</div>
-              <div className="review-decision-row">
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  disabled={decision === "merged" || ticket.status === "failed"}
-                  onClick={() => onDecide("approved")}
-                >
-                  Approve
-                </button>
-                <button
-                  type="button"
-                  className="btn"
-                  disabled={decision === "merged"}
-                  onClick={() => onDecide("changes_requested")}
-                >
-                  Request changes
-                </button>
-                <button
-                  type="button"
-                  className="btn"
-                  disabled={
-                    decision === "merged" ||
-                    (decision !== "approved" && ticket.status !== "succeeded")
-                  }
-                  onClick={() => onDecide("merged")}
-                >
-                  Merge
-                </button>
-                <span className={`review-chip review-${decision}`}>
-                  {decision === "awaiting"
-                    ? ticket.status === "failed"
-                      ? "Needs retry"
-                      : "Awaiting review"
-                    : decision.replace("_", " ")}
-                </span>
               </div>
             </section>
           )}

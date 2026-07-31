@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type KeyboardEvent } from "react";
 import type { Evidence } from "../types";
-import { summarizeDiff } from "./DiffCodeBlock";
+import { DiffAccordionItem } from "./DiffAccordionItem";
 import { EvidencePanel } from "./evidence/EvidencePanel";
 
 function evidenceSummary(evidence: Evidence): string {
@@ -11,22 +11,13 @@ function evidenceSummary(evidence: Evidence): string {
     case "terminal":
     case "tests":
       return evidence.title;
+    case "criteria": {
+      const met = evidence.results.filter((r) => r.met).length;
+      return `${met}/${evidence.results.length} met`;
+    }
     case "search":
       return evidence.query;
   }
-}
-
-function DiffStats({ content }: { content: string }) {
-  const { added, removed } = summarizeDiff(content);
-  if (added === 0 && removed === 0) return null;
-  return (
-    <span className="chat-result-diff-stats mono" aria-label={`${added} added, ${removed} removed`}>
-      {added > 0 && <span className="chat-result-diff-add">+{added}</span>}
-      {removed > 0 && (
-        <span className="chat-result-diff-del">−{removed}</span>
-      )}
-    </span>
-  );
 }
 
 interface ResultItemProps {
@@ -37,41 +28,89 @@ interface ResultItemProps {
 
 /** Artifact shown below the action that produced it. */
 export function ResultItem({ evidence, selected, onSelect }: ResultItemProps) {
+  if (evidence.kind === "diff") {
+    return (
+      <DiffAccordionItem
+        diff={evidence}
+        selected={selected}
+        onOpenDiff={onSelect}
+      />
+    );
+  }
+
+  return (
+    <NonDiffResultItem
+      evidence={evidence}
+      selected={selected}
+      onSelect={onSelect}
+    />
+  );
+}
+
+function NonDiffResultItem({
+  evidence,
+  selected,
+  onSelect,
+}: ResultItemProps) {
   const [open, setOpen] = useState(selected);
+  const path = evidenceSummary(evidence);
+  const pathIsLink = evidence.kind === "file";
 
   useEffect(() => {
     if (selected) setOpen(true);
   }, [selected]);
+
+  const toggleOpen = () => setOpen((prev) => !prev);
+
+  const onHeaderKeyDown = (e: KeyboardEvent) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      toggleOpen();
+    }
+  };
 
   return (
     <div
       className={`chat-result${open ? " open" : ""}${selected ? " selected" : ""}`}
       data-result={evidence.id}
     >
-      <button
-        type="button"
+      <div
         className="chat-result-trigger"
+        role="button"
+        tabIndex={0}
         aria-expanded={open}
-        onClick={() => {
-          onSelect();
-          setOpen((prev) => (selected ? !prev : true));
-        }}
+        onClick={toggleOpen}
+        onKeyDown={onHeaderKeyDown}
       >
         <span className="chat-result-label">
-          <span className="section-label">
-            {evidence.kind}
-            {evidence.kind === "diff" && (
-              <DiffStats content={evidence.content} />
-            )}
-          </span>
-          <span className="chat-result-path mono">
-            {evidenceSummary(evidence)}
-          </span>
+          <span className="section-label">{evidence.kind}</span>
         </span>
+        {pathIsLink ? (
+          <span
+            role="link"
+            tabIndex={0}
+            className="chat-result-path-link mono"
+            onClick={(e) => {
+              e.stopPropagation();
+              onSelect();
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.stopPropagation();
+                e.preventDefault();
+                onSelect();
+              }
+            }}
+          >
+            {path}
+          </span>
+        ) : (
+          <span className="chat-result-path mono">{path}</span>
+        )}
         <span className="chat-result-chevron" aria-hidden>
           {open ? "▾" : "▸"}
         </span>
-      </button>
+      </div>
       {open && (
         <div className="chat-result-body">
           <EvidencePanel evidence={evidence} compact />

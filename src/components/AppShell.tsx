@@ -2,28 +2,28 @@ import { useMemo, useState, type CSSProperties } from "react";
 import {
   blockedResolution,
   defaultConfig,
-  environmentTargets,
   idleStartScripts,
   initialTickets,
-  memoryItems,
   policyPlaybooks,
 } from "../data/mock";
 import type {
   AgentConfig,
+  CenterTab,
+  ContextRef,
   PlaceId,
   PolicyPlaybook,
+  PrCheck,
   ReviewDecision,
   Ticket,
 } from "../types";
 import { TopNav } from "./TopNav";
 import { ChatPanel } from "./ChatPanel";
 import { ColumnResizeHandle, useColumnWidths } from "./ColumnResize";
-import { EnvironmentsPage } from "./EnvironmentsPage";
-import { MemoryPage } from "./MemoryPage";
+import { DesignSystemPage } from "./DesignSystemPage";
 import { OpsPage } from "./OpsPage";
-import { PoliciesPage } from "./PoliciesPage";
+import { SettingsPage } from "./SettingsPage";
 import { TicketDetail } from "./TicketDetail";
-import { TicketQueue } from "./TicketQueue";
+import { TicketQueue, ShowQueueIcon } from "./TicketQueue";
 import { TypefaceSwitcher } from "./TypefaceSwitcher";
 import { DiffColorSwitcher } from "./DiffColorSwitcher";
 
@@ -53,6 +53,46 @@ function preferDiffEvidence(ticket: Ticket): string | null {
 }
 
 
+function nextPrNumber(tickets: Ticket[]) {
+  const max = tickets.reduce(
+    (n, t) => Math.max(n, t.delivery.prNumber ?? 0),
+    0,
+  );
+  return max + 1;
+}
+
+function deriveChecksFromTicket(ticket: Ticket): PrCheck[] {
+  const testEvidence = ticket.run.evidence.find((e) => e.kind === "tests");
+  if (testEvidence?.kind === "tests") {
+    const failed = testEvidence.results.filter((r) => !r.passed);
+    return [
+      {
+        name: "csv.stream.test",
+        status: failed.length ? "fail" : "pass",
+        detail: failed.length
+          ? failed.map((r) => r.name).join(", ")
+          : "All scenarios passed",
+      },
+      {
+        name: "lint",
+        status: "pass",
+      },
+    ];
+  }
+  if (ticket.run.performance) {
+    const { testsPassed, testsTotal } = ticket.run.performance;
+    return [
+      {
+        name: "Tests",
+        status: testsPassed === testsTotal ? "pass" : "fail",
+        detail: `${testsPassed}/${testsTotal} passed`,
+      },
+    ];
+  }
+  return [];
+}
+
+
 export function AppShell() {
   const initialEvidence = preferDiffEvidence(initialTickets[0]);
   const [tickets, setTickets] = useState(() => cloneTickets(initialTickets));
@@ -67,24 +107,28 @@ export function AppShell() {
   const [reviewDecisions, setReviewDecisions] = useState<
     Record<string, ReviewDecision>
   >({
-    t4: "awaiting",
-    t3: "awaiting",
+    t4: "todo",
+    t3: "todo",
   });
-  const [memoryId, setMemoryId] = useState(memoryItems[0].id);
-  const [envId, setEnvId] = useState(environmentTargets[0].id);
   const [starting, setStarting] = useState(false);
+  const [centerTab, setCenterTab] = useState<CenterTab>("ticket");
+  const [queueVisible, setQueueVisible] = useState(true);
 
   const ticket = useMemo(
     () => tickets.find((t) => t.id === selectedId) ?? null,
     [tickets, selectedId],
   );
+  const isSettings =
+    place === "memory" || place === "environments" || place === "policies";
+  const isDesignSystem = place === "design-system";
   const showChat = place === "tickets";
-  const hasQueue = place !== "ops";
+  const hasQueue = place === "tickets" && queueVisible;
   const { queueWidth, chatWidth, startQueueResize, startChatResize } =
-    useColumnWidths({ hasQueue, hasChat: showChat });
+    useColumnWidths({ hasQueue: place === "tickets" && queueVisible, hasChat: showChat });
 
   const selectTicket = (id: string) => {
     setSelectedId(id);
+    setCenterTab("ticket");
     const next = tickets.find((t) => t.id === id);
     if (!next) {
       setSelectedEvidenceId(null);
@@ -197,7 +241,7 @@ export function AppShell() {
     window.setTimeout(tick, 400);
   };
 
-  const answerBlocked = (answer: string) => {
+  const answerBlocked = (answer: string, _optionId?: string) => {
     if (!ticket) return;
 
     const baseTimeline = ticket.run.timeline.map((item) =>
@@ -226,6 +270,8 @@ export function AppShell() {
       run: {
         ...continuation,
         status: "succeeded",
+        pendingDecision: undefined,
+        blockedQuestion: undefined,
         timeline: [
           ...baseTimeline,
           {
@@ -254,6 +300,52 @@ export function AppShell() {
     setSelectedEvidenceId(preferred);
   };
 
+  const sendMessage = (payload: {
+    text: string;
+    attachments: { id: string; name: string; size: number }[];
+    contextRefs: ContextRef[];
+  }) => {
+    if (!ticket) return;
+    if (
+      !payload.text &&
+      payload.attachments.length === 0 &&
+      payload.contextRefs.length === 0
+    ) {
+      return;
+    }
+
+    updateTicket(ticket.id, (t) => ({
+      ...t,
+      run: {
+        ...t.run,
+        timeline: [
+          ...t.run.timeline,
+          {
+            id: `msg-${Date.now()}`,
+            type: "message",
+            role: "user",
+            content: payload.text,
+            contextRefs:
+              payload.contextRefs.length > 0
+                ? payload.contextRefs
+                : undefined,
+          },
+        ],
+      },
+    }));
+
+    const evidenceRef = payload.contextRefs.find(
+      (ref) =>
+        (ref.kind === "file" ||
+          ref.kind === "evidence" ||
+          ref.kind === "terminal") &&
+        ref.refId,
+    );
+    if (evidenceRef?.refId) {
+      setSelectedEvidenceId(evidenceRef.refId);
+    }
+  };
+
   const applyPolicy = (policy: PolicyPlaybook) => {
     setConfig(structuredClone(policy.config));
     setActivePolicyId(policy.id);
@@ -262,11 +354,11 @@ export function AppShell() {
   return (
     <div
       className={`app-shell${showChat ? "" : " app-shell-no-chat"}${
-        place === "ops" ? " app-shell-ops" : ""
-      }`}
+        place === "ops" || isSettings || isDesignSystem ? " app-shell-ops" : ""
+      }${place === "tickets" && !queueVisible ? " app-shell-queue-collapsed" : ""}`}
       style={
         {
-          "--queue-width": `${queueWidth}px`,
+          "--queue-width": `${place === "tickets" && !queueVisible ? 0 : queueWidth}px`,
           "--chat-width": `${chatWidth}px`,
         } as CSSProperties
       }
@@ -282,21 +374,41 @@ export function AppShell() {
 
       {place === "tickets" && (
         <>
-          <TicketQueue
-            tickets={tickets}
-            selectedId={selectedId}
-            onSelect={selectTicket}
-          />
+          {queueVisible && (
+            <TicketQueue
+              tickets={tickets}
+              selectedId={selectedId}
+              onSelect={selectTicket}
+              onHide={() => setQueueVisible(false)}
+            />
+          )}
           <main className="center">
+            {!queueVisible && (
+              <button
+                type="button"
+                className="queue-show-trigger"
+                aria-label="Show ticket list"
+                title="Show ticket list"
+                onClick={() => setQueueVisible(true)}
+              >
+                <ShowQueueIcon />
+              </button>
+            )}
             <div className="center-body">
               {ticket ? (
                 <TicketDetail
                   ticket={ticket}
                   selectedEvidenceId={selectedEvidenceId}
-                  onSelectEvidence={(id) => setSelectedEvidenceId(id)}
+                  onSelectEvidence={(id) => {
+                    setSelectedEvidenceId(id);
+                    if (id && ticket) {
+                      const ev = ticket.run.evidence.find((e) => e.id === id);
+                      if (ev?.kind === "diff") setCenterTab("evidence");
+                    }
+                  }}
                   onStart={startAgent}
                   starting={starting}
-                  decision={reviewDecisions[ticket.id] ?? "awaiting"}
+                  decision={reviewDecisions[ticket.id] ?? "todo"}
                   onDecide={(d) =>
                     setReviewDecisions((prev) => ({
                       ...prev,
@@ -338,6 +450,55 @@ export function AppShell() {
                       },
                     }))
                   }
+                  centerTab={centerTab}
+                  onCenterTabChange={setCenterTab}
+                  onOpenPullRequest={({ title, body, asDraft }) =>
+                    updateTicket(ticket.id, (t) => {
+                      const number = nextPrNumber(tickets);
+                      return {
+                        ...t,
+                        delivery: {
+                          ...t.delivery,
+                          prNumber: number,
+                          prStatus: asDraft ? "draft" : "open",
+                          prUrl: `#pr-${number}`,
+                          prTitle: title,
+                          prBody: body,
+                          baseBranch: t.delivery.baseBranch ?? "main",
+                          checks: deriveChecksFromTicket(t),
+                          comments: asDraft
+                            ? t.delivery.comments
+                            : [
+                                ...t.delivery.comments,
+                                {
+                                  id: `c-pr-${Date.now()}`,
+                                  author: "maya",
+                                  body: `Opened pull request #${number} for review.`,
+                                  createdAt: "just now",
+                                },
+                              ],
+                        },
+                      };
+                    })
+                  }
+                  onMarkReadyForReview={() =>
+                    updateTicket(ticket.id, (t) => ({
+                      ...t,
+                      delivery: {
+                        ...t.delivery,
+                        prStatus: "open",
+                        comments: [
+                          ...t.delivery.comments,
+                          {
+                            id: `c-pr-${Date.now()}`,
+                            author: "maya",
+                            body: "Marked pull request ready for review.",
+                            createdAt: "just now",
+                          },
+                        ],
+                      },
+                    }))
+                  }
                 />
               ) : (
                 <p style={{ color: "var(--muted)" }}>
@@ -361,30 +522,18 @@ export function AppShell() {
         </main>
       )}
 
-      {place === "policies" && (
-        <PoliciesPage
+      {isDesignSystem && <DesignSystemPage />}
+
+      {isSettings && (
+        <SettingsPage
+          place={place}
+          onNavigate={navigate}
           policies={policyPlaybooks}
-          selectedId={selectedPolicyId}
+          selectedPolicyId={selectedPolicyId}
           activePolicyId={activePolicyId}
-          onSelect={setSelectedPolicyId}
-          onApply={applyPolicy}
+          onSelectPolicy={setSelectedPolicyId}
+          onApplyPolicy={applyPolicy}
           config={config}
-        />
-      )}
-
-      {place === "memory" && (
-        <MemoryPage
-          selectedId={memoryId}
-          onSelect={setMemoryId}
-          onNavigateSettings={navigate}
-        />
-      )}
-
-      {place === "environments" && (
-        <EnvironmentsPage
-          selectedId={envId}
-          onSelect={setEnvId}
-          onNavigateSettings={navigate}
         />
       )}
 
@@ -395,9 +544,16 @@ export function AppShell() {
           selectedEvidenceId={selectedEvidenceId}
           config={config}
           onConfigChange={setConfig}
-          onSelectEvidence={setSelectedEvidenceId}
-          onSelectTicket={selectTicket}
+          onSelectEvidence={(id) => {
+                    setSelectedEvidenceId(id);
+                    if (id && ticket) {
+                      const ev = ticket.run.evidence.find((e) => e.id === id);
+                      if (ev?.kind === "diff") setCenterTab("evidence");
+                    }
+                  }}
           onAnswerBlocked={answerBlocked}
+          onSendMessage={sendMessage}
+          onOpenPullRequestTab={() => setCenterTab("pr")}
         />
       )}
 

@@ -77,6 +77,13 @@ function ActivityKindIcon({ kind }: { kind: ActivityKind }) {
           <path d="M8.5 13.5h7" {...stroke} />
         </svg>
       );
+    case "verify":
+      return (
+        <svg {...props}>
+          <path d="M9 6h11M9 12h11M9 18h7" {...stroke} />
+          <path d="m5 6 1.5 1.5L9 5M5 12l2.5 2.5L11 10M5 18l2.5 2.5L11 16" {...stroke} />
+        </svg>
+      );
     case "fix":
       return (
         <svg {...props}>

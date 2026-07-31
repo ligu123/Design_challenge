@@ -38,7 +38,7 @@ export function ReviewQueue({
       </div>
       <div className="queue-list">
         {items.map((ticket) => {
-          const decision = decisions[ticket.id] ?? "awaiting";
+          const decision = decisions[ticket.id] ?? "todo";
           return (
             <button
               key={ticket.id}
@@ -53,7 +53,7 @@ export function ReviewQueue({
               <div className="ticket-title">{ticket.title}</div>
               <div className="queue-item-meta">
                 <StatusChip status={ticket.status} />
-                {decision !== "awaiting" && (
+                {decision !== "todo" && (
                   <span className={`review-chip review-${decision}`}>
                     {reviewLabel(ticket, decision)}
                   </span>

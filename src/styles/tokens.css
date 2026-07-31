@@ -1,15 +1,15 @@
 :root,
 [data-typeface="plex"] {
-  --bg: #181818;
-  --panel: #141414;
-  --panel-raised: #1e1e1e;
-  --border: #222222;
-  --border-strong: #2a2a2a;
-  --fg: #e8e4df;
-  --fg-secondary: #a89f94;
-  --muted: #7a7268;
-  --hover: #222222;
-  --active: #2a2a2a;
+  --bg: #101010;
+  --panel: #0c0c0c;
+  --panel-raised: #161616;
+  --border: #1c1c1c;
+  --border-strong: #242424;
+  --fg: #f2efe9;
+  --fg-secondary: #c8c1b7;
+  --muted: #a39b92;
+  --hover: #1a1a1a;
+  --active: #222222;
 
   --running: #6b9fd4;
   --running-bg: #1a2530;
@@ -31,7 +31,7 @@
   --font-sans: "IBM Plex Sans", "Helvetica Neue", sans-serif;
   --font-mono: "IBM Plex Mono", "Menlo", monospace;
 
-  --radius: 8px;
+  --radius: 4px;
   --chat-width: 400px;
   --queue-width: 260px;
   --rail-width: 0px;

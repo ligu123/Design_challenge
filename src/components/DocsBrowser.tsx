@@ -39,11 +39,11 @@ export function DocsBrowser({
         </span>
         {selected ? (
           <button type="button" className="docs-crumb-link" onClick={closeFile}>
-            Documents
+            Files
           </button>
         ) : (
           <span className="docs-crumb-current" aria-current="page">
-            Documents
+            Files
           </span>
         )}
         {pathParts.map((part, i) => {

@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Priority, Ticket, TicketStatus } from "../types";
+import { getPendingDecision, decisionSummary } from "../lib/pendingDecision";
 import { PriorityIcon, StatusChip } from "./StatusChip";
 
 interface TicketQueueProps {
   tickets: Ticket[];
   selectedId: string | null;
   onSelect: (id: string) => void;
+  onHide?: () => void;
 }
 
 type ResolvedFilter = "all" | "resolved" | "open";
@@ -142,7 +144,47 @@ function CheckIcon() {
   );
 }
 
-export function TicketQueue({ tickets, selectedId, onSelect }: TicketQueueProps) {
+function HideQueueIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M4 5h6v14H4z"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M14 9l-4 3 4 3"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+export function ShowQueueIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M4 5h6v14H4z"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M10 9l4 3-4 3"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+export function TicketQueue({ tickets, selectedId, onSelect, onHide }: TicketQueueProps) {
   const [filters, setFilters] = useState<TicketFilters>(DEFAULT_FILTERS);
   const [open, setOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -382,6 +424,17 @@ export function TicketQueue({ tickets, selectedId, onSelect }: TicketQueueProps)
   return (
     <aside className="queue">
       <div className="queue-header queue-filter-bar" ref={panelRef}>
+        {onHide && (
+          <button
+            type="button"
+            className="queue-filter-trigger queue-hide-trigger"
+            aria-label="Hide ticket list"
+            title="Hide ticket list"
+            onClick={onHide}
+          >
+            <HideQueueIcon />
+          </button>
+        )}
         {searchOpen ? (
           <div className="queue-search-field">
             <SearchIcon />
@@ -541,6 +594,20 @@ export function TicketQueue({ tickets, selectedId, onSelect }: TicketQueueProps)
               <div className="ticket-item-main">
                 <span className="ticket-id">{ticket.key}</span>
                 <div className="ticket-title">{ticket.title}</div>
+                {ticket.status === "blocked" && (() => {
+                  const pending = getPendingDecision(ticket.run);
+                  if (!pending) return null;
+                  return (
+                    <div className="ticket-decision-hint">
+                      <span className="ticket-decision-kind">
+                        {pending.kind}
+                      </span>
+                      <span className="ticket-decision-title">
+                        {decisionSummary(pending)}
+                      </span>
+                    </div>
+                  );
+                })()}
               </div>
               <span className="ticket-item-icons">
                 <PriorityIcon priority={ticket.priority} />

@@ -1,14 +1,18 @@
 import { useEffect, useRef, useState } from "react";
 import type { PlaceId, Ticket } from "../types";
+import { TicketResolutionSummary } from "./TicketResolutionSummary";
 
 const items: { id: PlaceId; label: string }[] = [
   { id: "tickets", label: "Tickets" },
   { id: "ops", label: "Insights" },
-  { id: "policies", label: "Policies" },
   { id: "memory", label: "Settings" },
 ];
 
-const settingsPlaces = new Set<PlaceId>(["memory", "environments"]);
+const settingsPlaces = new Set<PlaceId>([
+  "memory",
+  "environments",
+  "policies",
+]);
 
 const ORGS = [
   { id: "acme", name: "Acme", mark: "A" },
@@ -151,15 +155,26 @@ export function TopNav({ place, onNavigate, tickets }: TopNavProps) {
       </nav>
 
       <div className="top-nav-end">
-        <p
-          className="top-nav-resolved"
-          title={`${resolved} of ${total} tickets resolved`}
-        >
-          <span className="mono">
-            {resolved}/{total}
-          </span>
-          <span className="top-nav-resolved-label">tickets resolved</span>
-        </p>
+        <div className="top-nav-resolved-wrap">
+          <button
+            type="button"
+            className="top-nav-resolved"
+            aria-describedby="top-nav-resolved-card"
+            title={`${resolved} of ${total} tickets resolved`}
+          >
+            <span className="mono">
+              {resolved}/{total}
+            </span>
+            <span className="top-nav-resolved-label">tickets resolved</span>
+          </button>
+          <div
+            id="top-nav-resolved-card"
+            className="top-nav-resolved-card"
+            role="tooltip"
+          >
+            <TicketResolutionSummary tickets={tickets} />
+          </div>
+        </div>
         <div className="top-nav-account" ref={menuRef}>
           <button
             type="button"
@@ -201,6 +216,17 @@ export function TopNav({ place, onNavigate, tickets }: TopNavProps) {
                 }}
               >
                 Settings
+              </button>
+              <button
+                type="button"
+                className="top-nav-account-item"
+                role="menuitem"
+                onClick={() => {
+                  setMenuOpen(false);
+                  onNavigate("design-system");
+                }}
+              >
+                Design system
               </button>
               <button
                 type="button"

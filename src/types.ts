@@ -15,15 +15,42 @@ export type ActivityKind =
   | "lint"
   | "terminal"
   | "test"
+  | "verify"
   | "fix"
   | "git"
   | "ask";
 
 export type ActivityStatus = "running" | "done" | "failed" | "waiting";
 
-export type EvidenceKind = "file" | "diff" | "terminal" | "tests" | "search";
+export type EvidenceKind =
+  | "file"
+  | "diff"
+  | "terminal"
+  | "tests"
+  | "criteria"
+  | "search";
 
 export type ModelEffort = "low" | "medium" | "high";
+
+export type ContextRefKind =
+  | "file"
+  | "folder"
+  | "doc"
+  | "terminal"
+  | "past-chat"
+  | "branch-diff"
+  | "browser"
+  | "evidence"
+  | "ticket";
+
+export interface ContextRef {
+  id: string;
+  kind: ContextRefKind;
+  label: string;
+  sublabel?: string;
+  /** Linked entity id (evidenceId, docId, sessionId, etc.) */
+  refId?: string;
+}
 
 export type TimelineItem =
   | {
@@ -31,6 +58,7 @@ export type TimelineItem =
       type: "message";
       role: "user" | "assistant";
       content: string;
+      contextRefs?: ContextRef[];
     }
   | {
       id: string;
@@ -88,11 +116,19 @@ export interface SearchEvidence {
   hits: { path: string; line: number; preview: string }[];
 }
 
+export interface CriteriaEvidence {
+  id: string;
+  kind: "criteria";
+  title: string;
+  results: { text: string; met: boolean; note?: string }[];
+}
+
 export type Evidence =
   | FileEvidence
   | DiffEvidence
   | TerminalEvidence
   | TestEvidence
+  | CriteriaEvidence
   | SearchEvidence;
 
 export interface PerformanceMetrics {
@@ -123,13 +159,43 @@ export type PlaceId =
   | "ops"
   | "policies"
   | "memory"
-  | "environments";
+  | "environments"
+  | "design-system";
 
 export type ReviewDecision =
-  | "awaiting"
+  | "todo"
+  | "in_progress"
   | "approved"
   | "changes_requested"
   | "merged";
+
+export type PendingDecisionKind =
+  | "choice"
+  | "clarification"
+  | "approval"
+  | "review";
+
+export interface DecisionOption {
+  id: string;
+  label: string;
+  description?: string;
+  /** Opens a custom reply field when selected */
+  isCustom?: boolean;
+}
+
+export interface PendingDecision {
+  id: string;
+  kind: PendingDecisionKind;
+  title: string;
+  prompt: string;
+  options?: DecisionOption[];
+  suggestedReplies?: string[];
+  contextRefs?: ContextRef[];
+  blockingStage?: RunStageId;
+  /** Epoch ms when the agent started waiting */
+  waitingSince?: number;
+  askActivityId?: string;
+}
 
 export interface AgentRun {
   id: string;
@@ -138,7 +204,9 @@ export interface AgentRun {
   evidence: Evidence[];
   filesChanged: string[];
   performance?: PerformanceMetrics;
+  /** @deprecated Prefer pendingDecision */
   blockedQuestion?: string;
+  pendingDecision?: PendingDecision;
   stages?: RunStage[];
 }
 
@@ -154,6 +222,16 @@ export interface TicketDocument {
 
 export type PrStatus = "none" | "draft" | "open" | "merged" | "closed";
 
+export type PrCheckStatus = "pending" | "pass" | "fail";
+
+export interface PrCheck {
+  name: string;
+  status: PrCheckStatus;
+  detail?: string;
+}
+
+export type CenterTab = "ticket" | "documents" | "tests" | "evidence" | "pr";
+
 export interface TicketComment {
   id: string;
   author: string;
@@ -167,6 +245,10 @@ export interface TicketDelivery {
   prNumber: number | null;
   prStatus: PrStatus;
   prUrl?: string;
+  prTitle?: string;
+  prBody?: string;
+  baseBranch?: string;
+  checks?: PrCheck[];
   commitSha: string | null;
   commitMessage: string | null;
   comments: TicketComment[];
